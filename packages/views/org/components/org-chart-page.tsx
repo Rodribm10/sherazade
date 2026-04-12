@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { Bot, Plus, Minus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -14,18 +15,18 @@ const MAX_ZOOM = 2.0;
 const ZOOM_STEP = 1.1;
 
 /**
- * Full-page org chart view. Loads all agents for the current workspace
- * and renders them as a hierarchical card tree driven by the
- * `reports_to` field. Archived agents are filtered out.
+ * Full-page org chart view.
  *
- * Includes a floating zoom toolbar in the bottom-right corner:
- *   +   zoom in (×1.1, capped at 2.0)
- *   −   zoom out (÷1.1, capped at 0.5)
- *   Fit reset to 100%
- *
- * Zoom is applied via CSS transform on the chart wrapper, so the
- * surrounding scroll container can still scroll through oversized
- * content without measuring anything.
+ * Interaction:
+ *   - Click-and-drag on the canvas pans the chart (cursor: grab/grabbing),
+ *     implemented by translating a mouse drag into scrollLeft/scrollTop
+ *     deltas on the scroll container. No external lib.
+ *   - Floating zoom toolbar in the upper-right corner:
+ *       +   zoom in  (×1.1, capped at 2.0)
+ *       −   zoom out (÷1.1, capped at 0.5)
+ *       Fit reset to 100%
+ *     The toolbar sits top-right rather than bottom-right to avoid
+ *     overlapping the "Ask Multica" chat launcher.
  */
 export function OrgChartPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -33,11 +34,49 @@ export function OrgChartPage() {
   const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
 
   const [zoom, setZoom] = useState(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   const activeAgents = useMemo(
     () => agents.filter((a) => !a.archived_at),
     [agents],
   );
+
+  const onMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    // Let clicks on cards (links) work normally — only start pan when
+    // the user presses on the canvas background itself.
+    if ((e.target as HTMLElement).closest("a, button, input, textarea")) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    dragState.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    };
+    setIsDragging(true);
+    // Avoid text selection while dragging.
+    e.preventDefault();
+  };
+
+  const onMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const st = dragState.current;
+    const el = scrollRef.current;
+    if (!st || !el) return;
+    el.scrollLeft = st.scrollLeft - (e.clientX - st.startX);
+    el.scrollTop = st.scrollTop - (e.clientY - st.startY);
+  };
+
+  const endDrag = () => {
+    dragState.current = null;
+    setIsDragging(false);
+  };
 
   if (isLoading || agentsLoading) {
     return (
@@ -65,7 +104,16 @@ export function OrgChartPage() {
         <EmptyState />
       ) : (
         <>
-          <div className="flex-1 overflow-auto">
+          <div
+            ref={scrollRef}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={endDrag}
+            onMouseLeave={endDrag}
+            className={`flex-1 select-none overflow-auto ${
+              isDragging ? "cursor-grabbing" : "cursor-grab"
+            }`}
+          >
             <div className="min-w-max p-10">
               <div
                 className="origin-top transition-transform duration-150 ease-out"
@@ -103,7 +151,7 @@ function ZoomToolbar({
   onFit: () => void;
 }) {
   return (
-    <div className="absolute bottom-6 right-6 flex flex-col gap-1">
+    <div className="absolute right-6 top-16 flex flex-col gap-1">
       <button
         type="button"
         onClick={onZoomIn}
