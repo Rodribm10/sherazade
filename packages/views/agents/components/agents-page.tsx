@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { Bot, Plus, Archive } from "lucide-react";
+import { Bot, Plus, Archive, List, Network } from "lucide-react";
 import type { CreateAgentRequest, UpdateAgentRequest } from "@multica/core/types";
 import {
   ResizablePanelGroup,
@@ -21,6 +21,7 @@ import { agentListOptions, workspaceKeys } from "@multica/core/workspace/queries
 import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentListItem } from "./agent-list-item";
 import { AgentDetail } from "./agent-detail";
+import { AgentOrgTree } from "./agent-org-tree";
 
 export function AgentsPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -30,6 +31,7 @@ export function AgentsPage() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [showArchived, setShowArchived] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "tree">("list");
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(runtimeListOptions(wsId));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_agents_layout",
@@ -141,6 +143,18 @@ export function AgentsPage() {
           <div className="flex h-12 items-center justify-between border-b px-4">
             <h1 className="text-sm font-semibold">Agents</h1>
             <div className="flex items-center gap-1">
+              <Button
+                variant={viewMode === "tree" ? "secondary" : "ghost"}
+                size="icon-xs"
+                onClick={() => setViewMode(viewMode === "tree" ? "list" : "tree")}
+                title={viewMode === "tree" ? "Show flat list" : "Show org chart"}
+              >
+                {viewMode === "tree" ? (
+                  <List className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Network className="h-4 w-4 text-muted-foreground" />
+                )}
+              </Button>
               {archivedCount > 0 && (
                 <Button
                   variant={showArchived ? "secondary" : "ghost"}
@@ -177,6 +191,12 @@ export function AgentsPage() {
                 </Button>
               )}
             </div>
+          ) : viewMode === "tree" ? (
+            <AgentOrgTree
+              agents={filteredAgents}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
           ) : (
             <div className="divide-y">
               {filteredAgents.map((agent) => (
