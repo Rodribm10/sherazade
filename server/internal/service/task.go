@@ -215,6 +215,22 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		}
 		triedAgents[agentKey] = struct{}{}
 
+		// Budget gate: skip agents that have blown their monthly budget.
+		// The candidate pool is small and this is a single keyed lookup,
+		// so the cost is negligible. Tasks stay queued until either the
+		// budget is raised or the monthly period rolls over.
+		if agent, err := s.Queries.GetAgent(ctx, candidate.AgentID); err == nil {
+			if agent.BudgetMonthlyCents.Valid &&
+				agent.SpentMonthlyCents >= agent.BudgetMonthlyCents.Int64 {
+				slog.Info("skipping agent with exhausted budget",
+					"agent_id", agentKey,
+					"spent_cents", agent.SpentMonthlyCents,
+					"budget_cents", agent.BudgetMonthlyCents.Int64,
+				)
+				continue
+			}
+		}
+
 		task, err := s.ClaimTask(ctx, candidate.AgentID)
 		if err != nil {
 			return nil, err

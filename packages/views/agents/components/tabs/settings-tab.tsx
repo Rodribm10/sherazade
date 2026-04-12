@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Network,
   X,
+  Wallet,
 } from "lucide-react";
 import type {
   Agent,
@@ -64,6 +65,26 @@ export function SettingsTab({
   // Reports-to: org chart hierarchy
   const [reportsTo, setReportsTo] = useState<string | null>(agent.reports_to);
   const [reportsToOpen, setReportsToOpen] = useState(false);
+
+  // Budget: stored as cents on the server, exposed in dollars in the UI.
+  // Empty string means "unlimited".
+  const initialBudgetDollars =
+    agent.budget_monthly_cents !== null
+      ? (agent.budget_monthly_cents / 100).toFixed(2)
+      : "";
+  const [budgetDollars, setBudgetDollars] = useState(initialBudgetDollars);
+  const spentDollars = agent.spent_monthly_cents / 100;
+  const budgetCentsParsed = (() => {
+    const t = budgetDollars.trim();
+    if (t === "") return null;
+    const parsed = Number(t);
+    if (!Number.isFinite(parsed) || parsed < 0) return NaN;
+    return Math.round(parsed * 100);
+  })();
+  const budgetPct =
+    agent.budget_monthly_cents && agent.budget_monthly_cents > 0
+      ? Math.min(100, (agent.spent_monthly_cents / agent.budget_monthly_cents) * 100)
+      : 0;
 
   // Compute descendants of THIS agent so we prevent selecting one as supervisor
   // (would create a cycle). Done client-side for instant feedback; the server
@@ -117,7 +138,8 @@ export function SettingsTab({
     selectedRuntimeId !== agent.runtime_id ||
     workdirMode !== initialWorkdirMode ||
     trimmedWorkdirPath !== initialWorkdirPath ||
-    reportsTo !== agent.reports_to;
+    reportsTo !== agent.reports_to ||
+    budgetDollars !== initialBudgetDollars;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -133,6 +155,10 @@ export function SettingsTab({
         toast.error("Workdir path must be an absolute path (start with /)");
         return;
       }
+    }
+    if (Number.isNaN(budgetCentsParsed)) {
+      toast.error("Budget must be a non-negative number in dollars");
+      return;
     }
     setSaving(true);
     try {
@@ -159,6 +185,10 @@ export function SettingsTab({
         // Only send reports_to when it actually changed, so we don't
         // include it on saves that don't touch the hierarchy.
         ...(reportsTo !== agent.reports_to && { reports_to: reportsTo }),
+        // Same thing for budget: only include when changed.
+        ...(budgetDollars !== initialBudgetDollars && {
+          budget_monthly_cents: budgetCentsParsed,
+        }),
       });
       toast.success("Settings saved");
     } catch {
@@ -266,6 +296,77 @@ export function SettingsTab({
           onChange={(e) => setMaxTasks(Number(e.target.value))}
           className="mt-1 w-24"
         />
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Monthly Budget (USD)</Label>
+        <div className="mt-1 flex items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5">
+            <Wallet className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">$</span>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={budgetDollars}
+              onChange={(e) => setBudgetDollars(e.target.value)}
+              placeholder="Unlimited"
+              className="h-8 w-28 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+            />
+          </div>
+          {budgetDollars.trim() !== "" && (
+            <button
+              type="button"
+              onClick={() => setBudgetDollars("")}
+              className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Spent this month:{" "}
+          <span className="font-medium text-foreground">
+            ${spentDollars.toFixed(2)}
+          </span>
+          {agent.budget_monthly_cents !== null && (
+            <>
+              {" / "}
+              <span className="font-medium text-foreground">
+                ${(agent.budget_monthly_cents / 100).toFixed(2)}
+              </span>
+            </>
+          )}
+          {agent.budget_period_start && (
+            <span className="ml-2 text-muted-foreground/70">
+              (period {agent.budget_period_start})
+            </span>
+          )}
+        </div>
+        {agent.budget_monthly_cents !== null && agent.budget_monthly_cents > 0 && (
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full transition-all ${
+                budgetPct >= 100
+                  ? "bg-destructive"
+                  : budgetPct >= 80
+                    ? "bg-warning"
+                    : "bg-primary"
+              }`}
+              style={{ width: `${budgetPct}%` }}
+            />
+          </div>
+        )}
+        {agent.budget_monthly_cents !== null &&
+          agent.spent_monthly_cents >= agent.budget_monthly_cents && (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+              <span>
+                Budget exceeded — new tasks for this agent are paused until the
+                period rolls over on the 1st or the budget is raised.
+              </span>
+            </div>
+          )}
       </div>
 
       <div>

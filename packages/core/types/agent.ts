@@ -74,6 +74,12 @@ export interface Agent {
    * or null if it has no supervisor. Used to build agent hierarchies.
    */
   reports_to: string | null;
+  /** Monthly budget in USD cents. null = unlimited. */
+  budget_monthly_cents: number | null;
+  /** Amount already spent in the current monthly period, in cents. */
+  spent_monthly_cents: number;
+  /** YYYY-MM-DD date of the first day of the current billing period. */
+  budget_period_start: string;
   skills: Skill[];
   created_at: string;
   updated_at: string;
@@ -91,6 +97,7 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   reports_to?: string | null;
+  budget_monthly_cents?: number | null;
 }
 
 export interface UpdateAgentRequest {
@@ -109,6 +116,11 @@ export interface UpdateAgentRequest {
    * these via raw JSON inspection.
    */
   reports_to?: string | null;
+  /**
+   * Budget change: absent = no change, null = clear (unlimited),
+   * number = set to this cents value. Three-state like reports_to.
+   */
+  budget_monthly_cents?: number | null;
 }
 
 // Skills

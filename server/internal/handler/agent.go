@@ -125,6 +125,10 @@ type AgentResponse struct {
 	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
 	OwnerID            *string         `json:"owner_id"`
 	ReportsTo          *string         `json:"reports_to"`
+	// Budget: NULL means unlimited. Cents for precision, UI converts to $.
+	BudgetMonthlyCents *int64          `json:"budget_monthly_cents"`
+	SpentMonthlyCents  int64           `json:"spent_monthly_cents"`
+	BudgetPeriodStart  string          `json:"budget_period_start"`
 	Skills             []SkillResponse `json:"skills"`
 	CreatedAt          string          `json:"created_at"`
 	UpdatedAt          string          `json:"updated_at"`
@@ -139,6 +143,16 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 	if rc == nil {
 		rc = map[string]any{}
+	}
+
+	var budget *int64
+	if a.BudgetMonthlyCents.Valid {
+		v := a.BudgetMonthlyCents.Int64
+		budget = &v
+	}
+	var periodStart string
+	if a.BudgetPeriodStart.Valid {
+		periodStart = a.BudgetPeriodStart.Time.Format("2006-01-02")
 	}
 
 	return AgentResponse{
@@ -156,6 +170,9 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		OwnerID:            uuidToPtr(a.OwnerID),
 		ReportsTo:          uuidToPtr(a.ReportsTo),
+		BudgetMonthlyCents: budget,
+		SpentMonthlyCents:  a.SpentMonthlyCents,
+		BudgetPeriodStart:  periodStart,
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
@@ -307,6 +324,7 @@ type CreateAgentRequest struct {
 	Visibility         string  `json:"visibility"`
 	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
 	ReportsTo          *string `json:"reports_to"`
+	BudgetMonthlyCents *int64  `json:"budget_monthly_cents"`
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -389,6 +407,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(agent.ID), "name", agent.Name, "workspace_id", workspaceID)...)
 
+	// Apply optional budget (create's base INSERT doesn't set it).
+	if req.BudgetMonthlyCents != nil && *req.BudgetMonthlyCents >= 0 {
+		bc := pgtype.Int8{Int64: *req.BudgetMonthlyCents, Valid: true}
+		if updated, err := h.Queries.SetAgentBudget(r.Context(), db.SetAgentBudgetParams{
+			ID:          agent.ID,
+			BudgetCents: bc,
+		}); err == nil {
+			agent = updated
+		}
+	}
+
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), agent.ID)
 		agent, _ = h.Queries.GetAgent(r.Context(), agent.ID)
@@ -417,6 +446,11 @@ type UpdateAgentRequest struct {
 	//   explicit null      -> clear supervisor
 	//   "uuid-string"      -> set supervisor
 	ReportsTo json.RawMessage `json:"reports_to,omitempty"`
+	// BudgetMonthlyCents follows the same three-state pattern:
+	//   absent  -> leave budget unchanged
+	//   null    -> clear budget (unlimited)
+	//   number  -> set budget to this cents value
+	BudgetMonthlyCents json.RawMessage `json:"budget_monthly_cents,omitempty"`
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -503,6 +537,34 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
+	}
+
+	// Handle budget changes separately so absent / null / number are all
+	// distinguishable. Same three-state pattern as reports_to below.
+	if len(req.BudgetMonthlyCents) > 0 {
+		var cents *int64
+		if err := json.Unmarshal(req.BudgetMonthlyCents, &cents); err != nil {
+			writeError(w, http.StatusBadRequest, "budget_monthly_cents: must be a non-negative integer or null")
+			return
+		}
+		var bc pgtype.Int8
+		if cents != nil {
+			if *cents < 0 {
+				writeError(w, http.StatusBadRequest, "budget_monthly_cents must be non-negative")
+				return
+			}
+			bc = pgtype.Int8{Int64: *cents, Valid: true}
+		}
+		if updated, err := h.Queries.SetAgentBudget(r.Context(), db.SetAgentBudgetParams{
+			ID:          agent.ID,
+			BudgetCents: bc,
+		}); err != nil {
+			slog.Warn("set agent budget failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to set budget: "+err.Error())
+			return
+		} else {
+			agent = updated
+		}
 	}
 
 	// Handle supervisor changes separately so we can distinguish "absent

@@ -40,6 +40,36 @@ UPDATE agent SET
 WHERE id = $1
 RETURNING *;
 
+-- name: SetAgentBudget :one
+-- Sets (or clears, via NULL) the monthly budget for an agent. Does not
+-- touch spent_monthly_cents — a budget change is not a rollover.
+UPDATE agent SET
+    budget_monthly_cents = sqlc.narg('budget_cents')::bigint,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: AddAgentSpent :one
+-- Increments spent_monthly_cents by the given delta, first doing a lazy
+-- monthly rollover: if the current month is later than budget_period_start's
+-- month, spent is reset to 0 and budget_period_start is bumped before the
+-- add. Returns the updated agent so the caller can read the new spent total
+-- and decide whether the budget was just exceeded.
+UPDATE agent SET
+    spent_monthly_cents = CASE
+        WHEN date_trunc('month', now())::date > budget_period_start
+        THEN sqlc.arg('delta_cents')::bigint
+        ELSE spent_monthly_cents + sqlc.arg('delta_cents')::bigint
+    END,
+    budget_period_start = CASE
+        WHEN date_trunc('month', now())::date > budget_period_start
+        THEN date_trunc('month', now())::date
+        ELSE budget_period_start
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: SetAgentSupervisor :one
 -- Sets or clears the reports_to supervisor. Passing NULL clears the link.
 -- Use this explicitly when you want to change the hierarchy, separate

@@ -38,6 +38,9 @@ type Agent struct {
 	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy         pgtype.UUID        `json:"archived_by"`
 	ReportsTo          pgtype.UUID        `json:"reports_to"`
+	BudgetMonthlyCents pgtype.Int8        `json:"budget_monthly_cents"`
+	SpentMonthlyCents  int64              `json:"spent_monthly_cents"`
+	BudgetPeriodStart  pgtype.Date        `json:"budget_period_start"`
 }
 
 type AgentRuntime struct {

@@ -11,10 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAgentSpent = `-- name: AddAgentSpent :one
+UPDATE agent SET
+    spent_monthly_cents = CASE
+        WHEN date_trunc('month', now())::date > budget_period_start
+        THEN $2::bigint
+        ELSE spent_monthly_cents + $2::bigint
+    END,
+    budget_period_start = CASE
+        WHEN date_trunc('month', now())::date > budget_period_start
+        THEN date_trunc('month', now())::date
+        ELSE budget_period_start
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+`
+
+type AddAgentSpentParams struct {
+	ID         pgtype.UUID `json:"id"`
+	DeltaCents int64       `json:"delta_cents"`
+}
+
+// Increments spent_monthly_cents by the given delta, first doing a lazy
+// monthly rollover: if the current month is later than budget_period_start's
+// month, spent is reset to 0 and budget_period_start is bumped before the
+// add. Returns the updated agent so the caller can read the new spent total
+// and decide whether the budget was just exceeded.
+func (q *Queries) AddAgentSpent(ctx context.Context, arg AddAgentSpentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, addAgentSpent, arg.ID, arg.DeltaCents)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
+	)
+	return i, err
+}
+
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 type ArchiveAgentParams struct {
@@ -44,6 +100,9 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -216,7 +275,7 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, reports_to
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 type CreateAgentParams struct {
@@ -269,6 +328,9 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -398,7 +460,7 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
 WHERE id = $1
 `
 
@@ -424,12 +486,15 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
 
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -460,6 +525,9 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -694,7 +762,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC
 `
@@ -727,6 +795,9 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.ArchivedAt,
 			&i.ArchivedBy,
 			&i.ReportsTo,
+			&i.BudgetMonthlyCents,
+			&i.SpentMonthlyCents,
+			&i.BudgetPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -739,7 +810,7 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 }
 
 const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -772,6 +843,9 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.ArchivedAt,
 			&i.ArchivedBy,
 			&i.ReportsTo,
+			&i.BudgetMonthlyCents,
+			&i.SpentMonthlyCents,
+			&i.BudgetPeriodStart,
 		); err != nil {
 			return nil, err
 		}
@@ -874,7 +948,7 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -899,6 +973,53 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
+	)
+	return i, err
+}
+
+const setAgentBudget = `-- name: SetAgentBudget :one
+UPDATE agent SET
+    budget_monthly_cents = $2::bigint,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+`
+
+type SetAgentBudgetParams struct {
+	ID          pgtype.UUID `json:"id"`
+	BudgetCents pgtype.Int8 `json:"budget_cents"`
+}
+
+// Sets (or clears, via NULL) the monthly budget for an agent. Does not
+// touch spent_monthly_cents — a budget change is not a rollover.
+func (q *Queries) SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, setAgentBudget, arg.ID, arg.BudgetCents)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -908,7 +1029,7 @@ UPDATE agent SET
     reports_to = $2::uuid,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 type SetAgentSupervisorParams struct {
@@ -942,6 +1063,9 @@ func (q *Queries) SetAgentSupervisor(ctx context.Context, arg SetAgentSupervisor
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -992,7 +1116,7 @@ UPDATE agent SET
     instructions = COALESCE($11, instructions),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 type UpdateAgentParams struct {
@@ -1043,6 +1167,9 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
@@ -1050,7 +1177,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
 `
 
 type UpdateAgentStatusParams struct {
@@ -1080,6 +1207,9 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.ArchivedAt,
 		&i.ArchivedBy,
 		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
 	)
 	return i, err
 }
