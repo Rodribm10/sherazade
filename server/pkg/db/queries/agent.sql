@@ -97,6 +97,25 @@ WITH RECURSIVE tree(id, reports_to) AS (
 )
 SELECT id FROM tree;
 
+-- name: PauseAgent :one
+-- Marks the agent as paused so the task claim loop will skip it.
+-- Running tasks keep running — pause only affects new claims.
+UPDATE agent SET
+    paused_at = now(),
+    pause_reason = sqlc.narg('pause_reason'),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ResumeAgent :one
+-- Clears the pause state and lets the agent claim tasks again.
+UPDATE agent SET
+    paused_at = NULL,
+    pause_reason = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1

@@ -11,7 +11,10 @@ import {
   AlertCircle,
   MoreHorizontal,
   Settings,
+  Pause,
+  Play,
 } from "lucide-react";
+import { Input } from "@multica/ui/components/ui/input";
 import type { Agent, RuntimeDevice } from "@multica/core/types";
 import {
   Dialog,
@@ -55,6 +58,8 @@ export function AgentDetail({
   onUpdate,
   onArchive,
   onRestore,
+  onPause,
+  onResume,
 }: {
   agent: Agent;
   agents: Agent[];
@@ -62,12 +67,17 @@ export function AgentDetail({
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
+  onPause: (id: string, reason: string) => Promise<void>;
+  onResume: (id: string) => Promise<void>;
 }) {
   const st = statusConfig[agent.status];
   const runtimeDevice = getRuntimeDevice(agent, runtimes);
   const [activeTab, setActiveTab] = useState<DetailTab>("instructions");
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [pauseDialogOpen, setPauseDialogOpen] = useState(false);
+  const [pauseReason, setPauseReason] = useState("");
   const isArchived = !!agent.archived_at;
+  const isPaused = !!agent.paused_at;
 
   return (
     <div className="flex h-full flex-col">
@@ -78,6 +88,28 @@ export function AgentDetail({
           <span className="flex-1">This agent is archived. It cannot be assigned or mentioned.</span>
           <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => onRestore(agent.id)}>
             Restore
+          </Button>
+        </div>
+      )}
+
+      {/* Pause Banner */}
+      {!isArchived && isPaused && (
+        <div className="flex items-center gap-2 bg-warning/10 px-4 py-2 text-xs border-b border-warning/30">
+          <Pause className="h-3.5 w-3.5 shrink-0 text-warning" />
+          <span className="flex-1 text-foreground">
+            Paused — tasks are queued but not executed.
+            {agent.pause_reason && (
+              <span className="ml-1 text-muted-foreground">{agent.pause_reason}</span>
+            )}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => onResume(agent.id)}
+          >
+            <Play className="h-3 w-3" />
+            Resume
           </Button>
         </div>
       )}
@@ -118,6 +150,22 @@ export function AgentDetail({
               <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
+              {isPaused ? (
+                <DropdownMenuItem onClick={() => onResume(agent.id)}>
+                  <Play className="h-3.5 w-3.5" />
+                  Resume Agent
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setPauseReason("");
+                    setPauseDialogOpen(true);
+                  }}
+                >
+                  <Pause className="h-3.5 w-3.5" />
+                  Pause Agent
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => setConfirmArchive(true)}
@@ -169,6 +217,47 @@ export function AgentDetail({
           />
         )}
       </div>
+
+      {/* Pause Dialog */}
+      {pauseDialogOpen && (
+        <Dialog open onOpenChange={(v) => { if (!v) setPauseDialogOpen(false); }}>
+          <DialogContent className="max-w-sm" showCloseButton={false}>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-warning/10">
+                <Pause className="h-5 w-5 text-warning" />
+              </div>
+              <DialogHeader className="flex-1 gap-1">
+                <DialogTitle className="text-sm font-semibold">Pause agent?</DialogTitle>
+                <DialogDescription className="text-xs">
+                  &quot;{agent.name}&quot; will stop claiming new tasks until resumed. Running tasks finish normally.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="mt-3">
+              <Input
+                value={pauseReason}
+                onChange={(e) => setPauseReason(e.target.value)}
+                placeholder="Reason (optional, shown in the banner)"
+                className="text-xs"
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setPauseDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  setPauseDialogOpen(false);
+                  onPause(agent.id, pauseReason.trim());
+                }}
+              >
+                Pause
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Archive Confirmation */}
       {confirmArchive && (

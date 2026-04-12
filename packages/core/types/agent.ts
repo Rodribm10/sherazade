@@ -80,6 +80,13 @@ export interface Agent {
   spent_monthly_cents: number;
   /** YYYY-MM-DD date of the first day of the current billing period. */
   budget_period_start: string;
+  /**
+   * Timestamp when the agent was paused. null = active. While paused,
+   * the task claim loop skips this agent until it is resumed.
+   */
+  paused_at: string | null;
+  /** Optional human-readable reason shown in the UI when paused. */
+  pause_reason: string | null;
   skills: Skill[];
   created_at: string;
   updated_at: string;

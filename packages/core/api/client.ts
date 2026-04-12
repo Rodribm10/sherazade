@@ -377,6 +377,17 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}/restore`, { method: "POST" });
   }
 
+  async pauseAgent(id: string, reason?: string): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/pause`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? "" }),
+    });
+  }
+
+  async resumeAgent(id: string): Promise<Agent> {
+    return this.fetch(`/api/agents/${id}/resume`, { method: "POST" });
+  }
+
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {
     const search = new URLSearchParams();
     const wsId = params?.workspace_id ?? this.workspaceId;

@@ -1,0 +1,3 @@
+ALTER TABLE agent
+  DROP COLUMN IF EXISTS pause_reason,
+  DROP COLUMN IF EXISTS paused_at;

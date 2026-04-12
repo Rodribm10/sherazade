@@ -61,6 +61,8 @@ export const mockAgents: Agent[] = [
     budget_monthly_cents: null,
     spent_monthly_cents: 0,
     budget_period_start: "2026-04-01",
+    paused_at: null,
+    pause_reason: null,
     skills: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

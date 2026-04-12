@@ -88,6 +88,26 @@ export function AgentsPage() {
     }
   };
 
+  const handlePause = async (id: string, reason: string) => {
+    try {
+      await api.pauseAgent(id, reason);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success("Agent paused");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to pause agent");
+    }
+  };
+
+  const handleResume = async (id: string) => {
+    try {
+      await api.resumeAgent(id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success("Agent resumed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to resume agent");
+    }
+  };
+
   const selected = agents.find((a) => a.id === selectedId) ?? null;
 
   if (isLoading) {
@@ -225,6 +245,8 @@ export function AgentsPage() {
             onUpdate={handleUpdate}
             onArchive={handleArchive}
             onRestore={handleRestore}
+            onPause={handlePause}
+            onResume={handleResume}
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">

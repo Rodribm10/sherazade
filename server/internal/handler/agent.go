@@ -129,6 +129,10 @@ type AgentResponse struct {
 	BudgetMonthlyCents *int64          `json:"budget_monthly_cents"`
 	SpentMonthlyCents  int64           `json:"spent_monthly_cents"`
 	BudgetPeriodStart  string          `json:"budget_period_start"`
+	// Pause: PausedAt is null when the agent is active. Claim loop
+	// skips paused agents entirely.
+	PausedAt    *string `json:"paused_at"`
+	PauseReason *string `json:"pause_reason"`
 	Skills             []SkillResponse `json:"skills"`
 	CreatedAt          string          `json:"created_at"`
 	UpdatedAt          string          `json:"updated_at"`
@@ -173,6 +177,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		BudgetMonthlyCents: budget,
 		SpentMonthlyCents:  a.SpentMonthlyCents,
 		BudgetPeriodStart:  periodStart,
+		PausedAt:           timestampToPtr(a.PausedAt),
+		PauseReason:        textToPtr(a.PauseReason),
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
@@ -672,6 +678,89 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// PauseAgentRequest optional body for POST /api/agents/:id/pause.
+// Reason is optional free-text shown in the UI so humans know why.
+type PauseAgentRequest struct {
+	Reason string `json:"reason"`
+}
+
+// PauseAgent marks an agent as paused. Running tasks keep running;
+// new task claims skip this agent until Resume is called. Different
+// from Archive, which hides the agent and cancels running tasks.
+func (h *Handler) PauseAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	if agent.PausedAt.Valid {
+		writeError(w, http.StatusConflict, "agent is already paused")
+		return
+	}
+
+	var req PauseAgentRequest
+	// Body is optional — tolerate empty/invalid JSON.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var reason pgtype.Text
+	if req.Reason != "" {
+		reason = pgtype.Text{String: req.Reason, Valid: true}
+	}
+
+	paused, err := h.Queries.PauseAgent(r.Context(), db.PauseAgentParams{
+		ID:          parseUUID(id),
+		PauseReason: reason,
+	})
+	if err != nil {
+		slog.Warn("pause agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to pause agent")
+		return
+	}
+
+	wsID := uuidToString(paused.WorkspaceID)
+	slog.Info("agent paused", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID, "reason", req.Reason)...)
+	resp := agentToResponse(paused)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ResumeAgent clears the pause state so the claim loop picks up
+// queued tasks for this agent again.
+func (h *Handler) ResumeAgent(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+	if !agent.PausedAt.Valid {
+		writeError(w, http.StatusConflict, "agent is not paused")
+		return
+	}
+
+	resumed, err := h.Queries.ResumeAgent(r.Context(), parseUUID(id))
+	if err != nil {
+		slog.Warn("resume agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to resume agent")
+		return
+	}
+
+	wsID := uuidToString(resumed.WorkspaceID)
+	slog.Info("agent resumed", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
+	resp := agentToResponse(resumed)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, wsID)
+	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 

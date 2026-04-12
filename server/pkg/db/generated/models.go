@@ -41,6 +41,8 @@ type Agent struct {
 	BudgetMonthlyCents pgtype.Int8        `json:"budget_monthly_cents"`
 	SpentMonthlyCents  int64              `json:"spent_monthly_cents"`
 	BudgetPeriodStart  pgtype.Date        `json:"budget_period_start"`
+	PausedAt           pgtype.Timestamptz `json:"paused_at"`
+	PauseReason        pgtype.Text        `json:"pause_reason"`
 }
 
 type AgentRuntime struct {

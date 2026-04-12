@@ -25,7 +25,7 @@ UPDATE agent SET
     END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type AddAgentSpentParams struct {
@@ -63,6 +63,8 @@ func (q *Queries) AddAgentSpent(ctx context.Context, arg AddAgentSpentParams) (A
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -70,7 +72,7 @@ func (q *Queries) AddAgentSpent(ctx context.Context, arg AddAgentSpentParams) (A
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type ArchiveAgentParams struct {
@@ -103,6 +105,8 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -275,7 +279,7 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, reports_to
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type CreateAgentParams struct {
@@ -331,6 +335,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -460,7 +466,7 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason FROM agent
 WHERE id = $1
 `
 
@@ -489,12 +495,14 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
 
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -528,6 +536,8 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -762,7 +772,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY created_at ASC
 `
@@ -798,6 +808,8 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.BudgetMonthlyCents,
 			&i.SpentMonthlyCents,
 			&i.BudgetPeriodStart,
+			&i.PausedAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}
@@ -810,7 +822,7 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 }
 
 const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason FROM agent
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -846,6 +858,8 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.BudgetMonthlyCents,
 			&i.SpentMonthlyCents,
 			&i.BudgetPeriodStart,
+			&i.PausedAt,
+			&i.PauseReason,
 		); err != nil {
 			return nil, err
 		}
@@ -945,10 +959,57 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 	return items, nil
 }
 
+const pauseAgent = `-- name: PauseAgent :one
+UPDATE agent SET
+    paused_at = now(),
+    pause_reason = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
+`
+
+type PauseAgentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	PauseReason pgtype.Text `json:"pause_reason"`
+}
+
+// Marks the agent as paused so the task claim loop will skip it.
+// Running tasks keep running — pause only affects new claims.
+func (q *Queries) PauseAgent(ctx context.Context, arg PauseAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, pauseAgent, arg.ID, arg.PauseReason)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
+	)
+	return i, err
+}
+
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -976,6 +1037,49 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
+	)
+	return i, err
+}
+
+const resumeAgent = `-- name: ResumeAgent :one
+UPDATE agent SET
+    paused_at = NULL,
+    pause_reason = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
+`
+
+// Clears the pause state and lets the agent claim tasks again.
+func (q *Queries) ResumeAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, resumeAgent, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.ReportsTo,
+		&i.BudgetMonthlyCents,
+		&i.SpentMonthlyCents,
+		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -985,7 +1089,7 @@ UPDATE agent SET
     budget_monthly_cents = $2::bigint,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type SetAgentBudgetParams struct {
@@ -1020,6 +1124,8 @@ func (q *Queries) SetAgentBudget(ctx context.Context, arg SetAgentBudgetParams) 
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -1029,7 +1135,7 @@ UPDATE agent SET
     reports_to = $2::uuid,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type SetAgentSupervisorParams struct {
@@ -1066,6 +1172,8 @@ func (q *Queries) SetAgentSupervisor(ctx context.Context, arg SetAgentSupervisor
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -1116,7 +1224,7 @@ UPDATE agent SET
     instructions = COALESCE($11, instructions),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type UpdateAgentParams struct {
@@ -1170,6 +1278,8 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
@@ -1177,7 +1287,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason
 `
 
 type UpdateAgentStatusParams struct {
@@ -1210,6 +1320,8 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.BudgetMonthlyCents,
 		&i.SpentMonthlyCents,
 		&i.BudgetPeriodStart,
+		&i.PausedAt,
+		&i.PauseReason,
 	)
 	return i, err
 }
