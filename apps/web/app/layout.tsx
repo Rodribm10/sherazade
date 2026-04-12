@@ -20,26 +20,21 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.multica.ai"),
+  metadataBase: new URL("http://localhost:3000"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: "Sherazade — AI Agent Hub",
+    template: "%s | Sherazade",
   },
   description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+    "Sherazade — fork of Multica with direct host filesystem access, agent hierarchy, budget tracking, and recurring schedules.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
   },
   openGraph: {
     type: "website",
-    siteName: "Multica",
+    siteName: "Sherazade",
     locale: "en_US",
-  },
-  twitter: {
-    card: "summary_large_image",
-    site: "@multica_hq",
-    creator: "@multica_hq",
   },
   alternates: {
     canonical: "/",

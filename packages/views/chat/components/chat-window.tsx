@@ -366,11 +366,11 @@ function EmptyState({ agentName }: { agentName?: string }) {
     <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8">
       <Send className="size-8 text-muted-foreground/50" />
       <div className="text-center">
-        <h3 className="text-base font-semibold">Welcome to Multica</h3>
+        <h3 className="text-base font-semibold">Welcome to Sherazade</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           {agentName
             ? `Chat with ${agentName} or ask anything`
-            : "Ask anything or tell Multica what you need"}
+            : "Ask anything or tell Sherazade what you need"}
         </p>
       </div>
     </div>
