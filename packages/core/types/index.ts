@@ -3,6 +3,7 @@ export type {
   Agent,
   AgentStatus,
   AgentRuntimeMode,
+  AgentRuntimeConfig,
   AgentVisibility,
   AgentTask,
   AgentRuntime,
