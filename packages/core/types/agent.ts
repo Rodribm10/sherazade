@@ -4,6 +4,24 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+/**
+ * Per-agent runtime tuning stored in the `agents.runtime_config` JSONB column.
+ * All fields are optional; omitted fields fall back to defaults.
+ *
+ * workdir_mode:
+ *  - "isolated" (default): daemon creates a throwaway workspace per task
+ *  - "direct": daemon uses `workdir_path` as cwd and edits real host files
+ *
+ * workdir_path: absolute host path on the DAEMON machine. Required when
+ * workdir_mode is "direct". Not validated server-side (daemon may run on
+ * a different machine than the server).
+ */
+export interface AgentRuntimeConfig {
+  workdir_mode?: "isolated" | "direct";
+  workdir_path?: string;
+  [key: string]: unknown;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -46,7 +64,7 @@ export interface Agent {
   instructions: string;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
-  runtime_config: Record<string, unknown>;
+  runtime_config: AgentRuntimeConfig;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -64,7 +82,7 @@ export interface CreateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_id: string;
-  runtime_config?: Record<string, unknown>;
+  runtime_config?: AgentRuntimeConfig;
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
 }
@@ -75,7 +93,7 @@ export interface UpdateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_id?: string;
-  runtime_config?: Record<string, unknown>;
+  runtime_config?: AgentRuntimeConfig;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;

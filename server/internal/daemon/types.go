@@ -39,10 +39,29 @@ type Task struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID           string      `json:"id"`
-	Name         string      `json:"name"`
-	Instructions string      `json:"instructions"`
-	Skills       []SkillData `json:"skills"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Instructions  string             `json:"instructions"`
+	Skills        []SkillData        `json:"skills"`
+	RuntimeConfig *AgentRuntimeConfig `json:"runtime_config,omitempty"`
+}
+
+// AgentRuntimeConfig mirrors the JSONB `runtime_config` column of the agents
+// table. It controls agent-level runtime behavior that the daemon needs to
+// honor. All fields are optional; zero values mean "use the default behavior".
+type AgentRuntimeConfig struct {
+	// WorkdirMode selects how the execution environment is built:
+	//   - "" or "isolated": default — daemon creates a throwaway workspace dir
+	//   - "direct":         daemon uses WorkdirPath as cwd and edits real files
+	WorkdirMode string `json:"workdir_mode,omitempty"`
+	// WorkdirPath is the absolute host path used when WorkdirMode == "direct".
+	WorkdirPath string `json:"workdir_path,omitempty"`
+}
+
+// IsDirectWorkdir reports whether the agent is configured to edit files
+// directly on a host path instead of running in an isolated workspace.
+func (c *AgentRuntimeConfig) IsDirectWorkdir() bool {
+	return c != nil && c.WorkdirMode == "direct" && c.WorkdirPath != ""
 }
 
 // SkillData represents a structured skill for task execution.

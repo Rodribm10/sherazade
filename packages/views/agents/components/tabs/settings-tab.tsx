@@ -10,8 +10,16 @@ import {
   Lock,
   Camera,
   ChevronDown,
+  FolderLock,
+  FolderOpen,
+  AlertTriangle,
 } from "lucide-react";
-import type { Agent, AgentVisibility, RuntimeDevice } from "@multica/core/types";
+import type {
+  Agent,
+  AgentRuntimeConfig,
+  AgentVisibility,
+  RuntimeDevice,
+} from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
@@ -41,6 +49,13 @@ export function SettingsTab({
   const [selectedRuntimeId, setSelectedRuntimeId] = useState(agent.runtime_id);
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Workdir mode: "isolated" (default) or "direct" (agent edits real host files)
+  const initialWorkdirMode: "isolated" | "direct" =
+    agent.runtime_config?.workdir_mode === "direct" ? "direct" : "isolated";
+  const initialWorkdirPath = agent.runtime_config?.workdir_path ?? "";
+  const [workdirMode, setWorkdirMode] = useState<"isolated" | "direct">(initialWorkdirMode);
+  const [workdirPath, setWorkdirPath] = useState(initialWorkdirPath);
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -60,26 +75,53 @@ export function SettingsTab({
     }
   };
 
+  const trimmedWorkdirPath = workdirPath.trim();
   const dirty =
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
     maxTasks !== agent.max_concurrent_tasks ||
-    selectedRuntimeId !== agent.runtime_id;
+    selectedRuntimeId !== agent.runtime_id ||
+    workdirMode !== initialWorkdirMode ||
+    trimmedWorkdirPath !== initialWorkdirPath;
 
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Name is required");
       return;
     }
+    if (workdirMode === "direct") {
+      if (!trimmedWorkdirPath) {
+        toast.error("Workdir path is required when using direct mode");
+        return;
+      }
+      if (!trimmedWorkdirPath.startsWith("/")) {
+        toast.error("Workdir path must be an absolute path (start with /)");
+        return;
+      }
+    }
     setSaving(true);
     try {
+      // Preserve any unknown keys already stored in runtime_config so this
+      // form doesn't clobber future settings it doesn't know about.
+      const nextRuntimeConfig: AgentRuntimeConfig = {
+        ...(agent.runtime_config ?? {}),
+      };
+      if (workdirMode === "direct") {
+        nextRuntimeConfig.workdir_mode = "direct";
+        nextRuntimeConfig.workdir_path = trimmedWorkdirPath;
+      } else {
+        // Isolated is the default — drop the keys entirely.
+        delete nextRuntimeConfig.workdir_mode;
+        delete nextRuntimeConfig.workdir_path;
+      }
       await onSave({
         name: name.trim(),
         description,
         visibility,
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
+        runtime_config: nextRuntimeConfig,
       });
       toast.success("Settings saved");
     } catch {
@@ -255,6 +297,68 @@ export function SettingsTab({
             ))}
           </PopoverContent>
         </Popover>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Working Directory</Label>
+        <div className="mt-1.5 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setWorkdirMode("isolated")}
+            className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+              workdirMode === "isolated"
+                ? "border-primary bg-primary/5"
+                : "border-border hover:bg-muted"
+            }`}
+          >
+            <FolderLock className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="text-left">
+              <div className="font-medium">Isolated</div>
+              <div className="text-xs text-muted-foreground">
+                Sandbox per task (default)
+              </div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setWorkdirMode("direct")}
+            className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+              workdirMode === "direct"
+                ? "border-primary bg-primary/5"
+                : "border-border hover:bg-muted"
+            }`}
+          >
+            <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="text-left">
+              <div className="font-medium">Direct</div>
+              <div className="text-xs text-muted-foreground">
+                Edit real host files
+              </div>
+            </div>
+          </button>
+        </div>
+        {workdirMode === "direct" && (
+          <div className="mt-3 space-y-2">
+            <Input
+              value={workdirPath}
+              onChange={(e) => setWorkdirPath(e.target.value)}
+              placeholder="/Users/you/Dev/your-project"
+              className="font-mono text-xs"
+            />
+            <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 p-2.5 text-xs">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+              <div>
+                <div className="font-medium text-warning">Direct mode is destructive.</div>
+                <div className="mt-0.5 text-muted-foreground">
+                  The agent will edit files at this path directly on the daemon host.
+                  Your existing CLAUDE.md and .claude/ are left untouched; only a hidden
+                  .agent_context/ folder is created. Use a dedicated project path and
+                  make sure the agent runtime runs on the same machine.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">

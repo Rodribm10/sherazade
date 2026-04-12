@@ -28,6 +28,26 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) error 
 	}
 }
 
+// InjectRuntimeConfigDirect writes the meta skill content into
+// {workDir}/.agent_context/MULTICA_RUNTIME.md instead of the root CLAUDE.md
+// or AGENTS.md file. Used in direct mode so the daemon never overwrites
+// the user's existing agent-config files in a real project directory.
+//
+// The path returned should be referenced from the task prompt so the agent
+// reads it explicitly at startup.
+func InjectRuntimeConfigDirect(workDir, provider string, ctx TaskContextForEnv) (string, error) {
+	contextDir := filepath.Join(workDir, ".agent_context")
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		return "", fmt.Errorf("create .agent_context dir: %w", err)
+	}
+	path := filepath.Join(contextDir, "MULTICA_RUNTIME.md")
+	content := buildMetaSkillContent(provider, ctx)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write MULTICA_RUNTIME.md: %w", err)
+	}
+	return path, nil
+}
+
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {

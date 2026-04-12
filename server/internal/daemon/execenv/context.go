@@ -43,6 +43,22 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	return nil
 }
 
+// writeIssueContextOnly writes only the .agent_context/issue_context.md file,
+// without touching skills or any provider-native paths. Used in direct mode
+// to avoid polluting a real user project directory (.claude/, .config/, etc).
+func writeIssueContextOnly(workDir, provider string, ctx TaskContextForEnv) error {
+	contextDir := filepath.Join(workDir, ".agent_context")
+	if err := os.MkdirAll(contextDir, 0o755); err != nil {
+		return fmt.Errorf("create .agent_context dir: %w", err)
+	}
+	content := renderIssueContext(provider, ctx)
+	path := filepath.Join(contextDir, "issue_context.md")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write issue_context.md: %w", err)
+	}
+	return nil
+}
+
 // resolveSkillsDir returns the directory where skills should be written
 // based on the agent provider.
 func resolveSkillsDir(workDir, provider string) (string, error) {

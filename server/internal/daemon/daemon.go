@@ -900,9 +900,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ChatSessionID:     task.ChatSessionID,
 	}
 
+	// Read per-agent runtime config to decide workdir mode.
+	// Direct mode makes the agent edit the real host path; default is isolated.
+	var directWorkDir string
+	if task.Agent != nil && task.Agent.RuntimeConfig.IsDirectWorkdir() {
+		directWorkDir = task.Agent.RuntimeConfig.WorkdirPath
+		taskLog.Info("using direct workdir mode",
+			"workdir", directWorkDir,
+			"agent", agentName,
+		)
+	}
+
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+	// In direct mode we skip reuse — the path is stable and comes from config.
 	var env *execenv.Environment
-	if task.PriorWorkDir != "" {
+	if directWorkDir == "" && task.PriorWorkDir != "" {
 		env = execenv.Reuse(task.PriorWorkDir, provider, taskCtx, d.logger)
 	}
 	if env == nil {
@@ -914,21 +926,44 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 			AgentName:      agentName,
 			Provider:       provider,
 			Task:           taskCtx,
+			DirectWorkDir:  directWorkDir,
 		}, d.logger)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	// Inject runtime-specific config. In isolated mode this writes CLAUDE.md/AGENTS.md
+	// at the workdir root. In direct mode we write to .agent_context/MULTICA_RUNTIME.md
+	// instead so we never overwrite the user's real project config files.
+	var directRuntimePath string
+	if env.DirectMode {
+		p, err := execenv.InjectRuntimeConfigDirect(env.WorkDir, provider, taskCtx)
+		if err != nil {
+			d.logger.Warn("execenv: inject runtime config (direct) failed (non-fatal)", "error", err)
+		} else {
+			directRuntimePath = p
+		}
+	} else {
+		if err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); err != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+		}
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
 	// task completion and passed back via PriorWorkDir on the next claim.
 
 	prompt := BuildPrompt(task)
+	// In direct mode the runtime meta-skill lives in .agent_context/MULTICA_RUNTIME.md
+	// (we never write CLAUDE.md/AGENTS.md at the root of a real project). Nudge
+	// the agent to read it before doing anything else.
+	if directRuntimePath != "" {
+		rel, err := filepath.Rel(env.WorkDir, directRuntimePath)
+		if err != nil {
+			rel = directRuntimePath
+		}
+		prompt = "IMPORTANT: Before starting, read `" + rel + "` for the Multica runtime instructions, available CLI commands, and your agent identity.\n\n" + prompt
+	}
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -1146,11 +1181,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		if result.Output == "" {
 			return TaskResult{}, fmt.Errorf("%s returned empty output", provider)
 		}
+		// In direct mode we do NOT report the WorkDir back to the server. The
+		// path is a real user directory configured on the agent, not a daemon-
+		// managed workspace; persisting it as PriorWorkDir would cause future
+		// tasks to accidentally Reuse() the live path and overwrite files.
+		reportedWorkDir := env.WorkDir
+		if env.DirectMode {
+			reportedWorkDir = ""
+		}
 		return TaskResult{
 			Status:    "completed",
 			Comment:   result.Output,
 			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
+			WorkDir:   reportedWorkDir,
 			Usage:     usageEntries,
 		}, nil
 	case "timeout":

@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -12,6 +14,60 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// validateRuntimeConfig enforces the runtime_config schema. Returns a non-nil
+// error if the payload is malformed. Note: the path is NOT checked for
+// existence here because runtime_config.workdir_path refers to the daemon's
+// host filesystem, which may be a different machine than the server. The
+// daemon validates existence at task execution time.
+//
+// Schema recognized today:
+//   workdir_mode: "" | "isolated" | "direct"
+//   workdir_path: absolute host path, required when workdir_mode == "direct"
+//
+// Unknown keys are ignored so future knobs can be added without breaking
+// existing clients.
+func validateRuntimeConfig(raw any) error {
+	if raw == nil {
+		return nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("runtime_config must be a JSON object")
+	}
+	modeVal, hasMode := m["workdir_mode"]
+	pathVal, hasPath := m["workdir_path"]
+
+	var mode, path string
+	if hasMode {
+		mode, ok = modeVal.(string)
+		if !ok {
+			return fmt.Errorf("workdir_mode must be a string")
+		}
+	}
+	if hasPath {
+		path, ok = pathVal.(string)
+		if !ok {
+			return fmt.Errorf("workdir_path must be a string")
+		}
+	}
+
+	switch mode {
+	case "", "isolated":
+		// Default mode — no further checks.
+		return nil
+	case "direct":
+		if path == "" {
+			return fmt.Errorf("workdir_path is required when workdir_mode is \"direct\"")
+		}
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("workdir_path must be an absolute path")
+		}
+		return nil
+	default:
+		return fmt.Errorf("workdir_mode %q is not supported (use \"isolated\" or \"direct\")", mode)
+	}
+}
 
 type AgentResponse struct {
 	ID                 string          `json:"id"`
@@ -98,10 +154,14 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	// RuntimeConfig is the raw JSONB payload from the agents.runtime_config
+	// column, passed through to the daemon so it can honor per-agent runtime
+	// knobs (e.g. workdir_mode = "direct" to edit real host files).
+	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -243,6 +303,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateRuntimeConfig(req.RuntimeConfig); err != nil {
+		writeError(w, http.StatusBadRequest, "runtime_config: "+err.Error())
+		return
+	}
+
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -343,6 +408,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 	if req.RuntimeConfig != nil {
+		if err := validateRuntimeConfig(req.RuntimeConfig); err != nil {
+			writeError(w, http.StatusBadRequest, "runtime_config: "+err.Error())
+			return
+		}
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
 	}
