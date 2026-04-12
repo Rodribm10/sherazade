@@ -53,7 +53,9 @@ func allowedOrigins() []string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+// The second return value exposes the task service so callers (e.g. main) can
+// share it with background workers like the scheduler.
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Router, *service.TaskService) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
 
@@ -263,6 +265,16 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Scheduled tasks — recurring cron-like issue creations.
+			r.Route("/api/schedules", func(r chi.Router) {
+				r.Get("/", h.ListScheduledTasks)
+				r.Post("/", h.CreateScheduledTask)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Put("/", h.UpdateScheduledTask)
+					r.Delete("/", h.DeleteScheduledTask)
+				})
+			})
+
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)
@@ -326,7 +338,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 		})
 	})
 
-	return r
+	return r, h.TaskService
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

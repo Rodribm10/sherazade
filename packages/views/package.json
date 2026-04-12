@@ -26,6 +26,7 @@
     "./skills": "./skills/index.ts",
     "./agents": "./agents/index.ts",
     "./org": "./org/index.ts",
+    "./schedules": "./schedules/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",

@@ -50,6 +50,9 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
+  ScheduledTask,
+  CreateScheduledTaskRequest,
+  UpdateScheduledTaskRequest,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -386,6 +389,28 @@ export class ApiClient {
 
   async resumeAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/resume`, { method: "POST" });
+  }
+
+  async listSchedules(): Promise<ScheduledTask[]> {
+    return this.fetch("/api/schedules");
+  }
+
+  async createSchedule(data: CreateScheduledTaskRequest): Promise<ScheduledTask> {
+    return this.fetch("/api/schedules", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateSchedule(id: string, data: UpdateScheduledTaskRequest): Promise<ScheduledTask> {
+    return this.fetch(`/api/schedules/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSchedule(id: string): Promise<void> {
+    await this.fetch(`/api/schedules/${id}`, { method: "DELETE" });
   }
 
   async listRuntimes(params?: { workspace_id?: string; owner?: "me" }): Promise<AgentRuntime[]> {

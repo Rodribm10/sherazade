@@ -31,6 +31,7 @@ import {
   PinOff,
   Network,
   MessageSquare,
+  Clock,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -81,6 +82,7 @@ const workspaceNav = [
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/org", label: "Org Chart", icon: Network },
   { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/schedules", label: "Schedules", icon: Clock },
 ];
 
 const configureNav = [
