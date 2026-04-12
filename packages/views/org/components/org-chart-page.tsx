@@ -17,16 +17,15 @@ const ZOOM_STEP = 1.1;
 /**
  * Full-page org chart view.
  *
- * Interaction:
- *   - Click-and-drag on the canvas pans the chart (cursor: grab/grabbing),
- *     implemented by translating a mouse drag into scrollLeft/scrollTop
- *     deltas on the scroll container. No external lib.
- *   - Floating zoom toolbar in the upper-right corner:
- *       +   zoom in  (×1.1, capped at 2.0)
- *       −   zoom out (÷1.1, capped at 0.5)
- *       Fit reset to 100%
- *     The toolbar sits top-right rather than bottom-right to avoid
- *     overlapping the "Ask Multica" chat launcher.
+ * Interaction model (Figma/Miro style):
+ *   - The chart is rendered inside an overflow-hidden canvas.
+ *   - Position is held as a {x, y} state and applied via
+ *     `transform: translate(Xpx, Ypx) scale(Z)`. This is the only
+ *     approach that keeps pan working after a CSS scale, because
+ *     `transform: scale` doesn't grow the element's box — a plain
+ *     overflow-auto container would not know how to scroll it.
+ *   - Mouse drag on empty canvas updates x/y directly.
+ *   - Floating zoom toolbar in the upper-right corner.
  */
 export function OrgChartPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -34,13 +33,8 @@ export function OrgChartPage() {
   const { data: agents = [], isLoading: agentsLoading } = useQuery(agentListOptions(wsId));
 
   const [zoom, setZoom] = useState(1);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef<{
-    startX: number;
-    startY: number;
-    scrollLeft: number;
-    scrollTop: number;
-  } | null>(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragStart = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const activeAgents = useMemo(
@@ -49,33 +43,36 @@ export function OrgChartPage() {
   );
 
   const onMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
-    // Let clicks on cards (links) work normally — only start pan when
-    // the user presses on the canvas background itself.
+    // Ignore presses that land on interactive elements — we still want
+    // links and buttons to behave normally inside the canvas.
     if ((e.target as HTMLElement).closest("a, button, input, textarea")) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    dragState.current = {
-      startX: e.clientX,
-      startY: e.clientY,
-      scrollLeft: el.scrollLeft,
-      scrollTop: el.scrollTop,
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panX: pan.x,
+      panY: pan.y,
     };
     setIsDragging(true);
-    // Avoid text selection while dragging.
     e.preventDefault();
   };
 
   const onMouseMove = (e: ReactMouseEvent<HTMLDivElement>) => {
-    const st = dragState.current;
-    const el = scrollRef.current;
-    if (!st || !el) return;
-    el.scrollLeft = st.scrollLeft - (e.clientX - st.startX);
-    el.scrollTop = st.scrollTop - (e.clientY - st.startY);
+    const start = dragStart.current;
+    if (!start) return;
+    setPan({
+      x: start.panX + (e.clientX - start.x),
+      y: start.panY + (e.clientY - start.y),
+    });
   };
 
   const endDrag = () => {
-    dragState.current = null;
+    dragStart.current = null;
     setIsDragging(false);
+  };
+
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   };
 
   if (isLoading || agentsLoading) {
@@ -105,22 +102,23 @@ export function OrgChartPage() {
       ) : (
         <>
           <div
-            ref={scrollRef}
             onMouseDown={onMouseDown}
             onMouseMove={onMouseMove}
             onMouseUp={endDrag}
             onMouseLeave={endDrag}
-            className={`flex-1 select-none overflow-auto ${
+            className={`relative flex-1 select-none overflow-hidden ${
               isDragging ? "cursor-grabbing" : "cursor-grab"
             }`}
           >
-            <div className="min-w-max p-10">
-              <div
-                className="origin-top transition-transform duration-150 ease-out"
-                style={{ transform: `scale(${zoom})` }}
-              >
-                <OrgChart agents={activeAgents} />
-              </div>
+            <div
+              className="absolute left-1/2 top-10"
+              style={{
+                transform: `translate(calc(-50% + ${pan.x}px), ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "top center",
+                transition: isDragging ? "none" : "transform 150ms ease-out",
+              }}
+            >
+              <OrgChart agents={activeAgents} />
             </div>
           </div>
           <ZoomToolbar
@@ -131,7 +129,7 @@ export function OrgChartPage() {
             onZoomOut={() =>
               setZoom((z) => Math.max(MIN_ZOOM, +(z / ZOOM_STEP).toFixed(3)))
             }
-            onFit={() => setZoom(1)}
+            onFit={resetView}
           />
         </>
       )}
@@ -173,8 +171,8 @@ function ZoomToolbar({
       <button
         type="button"
         onClick={onFit}
-        aria-label="Reset zoom"
-        title={`${Math.round(zoom * 100)}% → 100%`}
+        aria-label="Reset view"
+        title={`${Math.round(zoom * 100)}% — click to reset view`}
         className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground"
       >
         Fit
