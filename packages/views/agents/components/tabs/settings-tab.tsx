@@ -13,6 +13,8 @@ import {
   FolderLock,
   FolderOpen,
   AlertTriangle,
+  Network,
+  X,
 } from "lucide-react";
 import type {
   Agent,
@@ -35,10 +37,12 @@ import { ActorAvatar } from "../../../common/actor-avatar";
 
 export function SettingsTab({
   agent,
+  agents,
   runtimes,
   onSave,
 }: {
   agent: Agent;
+  agents: Agent[];
   runtimes: RuntimeDevice[];
   onSave: (updates: Partial<Agent>) => Promise<void>;
 }) {
@@ -56,6 +60,35 @@ export function SettingsTab({
   const initialWorkdirPath = agent.runtime_config?.workdir_path ?? "";
   const [workdirMode, setWorkdirMode] = useState<"isolated" | "direct">(initialWorkdirMode);
   const [workdirPath, setWorkdirPath] = useState(initialWorkdirPath);
+
+  // Reports-to: org chart hierarchy
+  const [reportsTo, setReportsTo] = useState<string | null>(agent.reports_to);
+  const [reportsToOpen, setReportsToOpen] = useState(false);
+
+  // Compute descendants of THIS agent so we prevent selecting one as supervisor
+  // (would create a cycle). Done client-side for instant feedback; the server
+  // also enforces this on save.
+  const descendantIds = (() => {
+    const result = new Set<string>();
+    const stack = [agent.id];
+    while (stack.length > 0) {
+      const currentId = stack.pop()!;
+      for (const a of agents) {
+        if (a.reports_to === currentId && !result.has(a.id)) {
+          result.add(a.id);
+          stack.push(a.id);
+        }
+      }
+    }
+    return result;
+  })();
+
+  // Valid supervisor candidates: any non-archived agent in the workspace
+  // that isn't this agent and isn't one of its descendants.
+  const supervisorCandidates = agents.filter(
+    (a) => a.id !== agent.id && !descendantIds.has(a.id) && !a.archived_at,
+  );
+  const supervisorAgent = agents.find((a) => a.id === reportsTo) ?? null;
   const { upload, uploading } = useFileUpload(api);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +116,8 @@ export function SettingsTab({
     maxTasks !== agent.max_concurrent_tasks ||
     selectedRuntimeId !== agent.runtime_id ||
     workdirMode !== initialWorkdirMode ||
-    trimmedWorkdirPath !== initialWorkdirPath;
+    trimmedWorkdirPath !== initialWorkdirPath ||
+    reportsTo !== agent.reports_to;
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -122,6 +156,9 @@ export function SettingsTab({
         max_concurrent_tasks: maxTasks,
         runtime_id: selectedRuntimeId,
         runtime_config: nextRuntimeConfig,
+        // Only send reports_to when it actually changed, so we don't
+        // include it on saves that don't touch the hierarchy.
+        ...(reportsTo !== agent.reports_to && { reports_to: reportsTo }),
       });
       toast.success("Settings saved");
     } catch {
@@ -295,6 +332,81 @@ export function SettingsTab({
                 />
               </button>
             ))}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <div>
+        <Label className="text-xs text-muted-foreground">Reports To</Label>
+        <Popover open={reportsToOpen} onOpenChange={setReportsToOpen}>
+          <PopoverTrigger className="mt-1.5 flex w-full items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted">
+            <Network className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">
+                {supervisorAgent?.name ?? "No supervisor"}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {supervisorAgent
+                  ? "Supervisor in the agent hierarchy"
+                  : "Top-level agent (no one above)"}
+              </div>
+            </div>
+            {supervisorAgent && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setReportsTo(null);
+                }}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Clear supervisor"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                reportsToOpen ? "rotate-180" : ""
+              }`}
+            />
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-[var(--anchor-width)] p-1 max-h-72 overflow-y-auto"
+          >
+            {supervisorCandidates.length === 0 ? (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                No other agents available to pick as supervisor.
+              </div>
+            ) : (
+              supervisorCandidates.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  onClick={() => {
+                    setReportsTo(candidate.id);
+                    setReportsToOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    candidate.id === reportsTo ? "bg-accent" : "hover:bg-accent/50"
+                  }`}
+                >
+                  <ActorAvatar
+                    actorType="agent"
+                    actorId={candidate.id}
+                    size={28}
+                    className="shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{candidate.name}</div>
+                    {candidate.description && (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {candidate.description}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))
+            )}
           </PopoverContent>
         </Popover>
       </div>

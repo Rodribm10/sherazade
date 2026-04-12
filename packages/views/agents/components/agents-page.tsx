@@ -200,6 +200,7 @@ export function AgentsPage() {
           <AgentDetail
             key={selected.id}
             agent={selected}
+            agents={agents}
             runtimes={runtimes}
             onUpdate={handleUpdate}
             onArchive={handleArchive}

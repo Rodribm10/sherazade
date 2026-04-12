@@ -37,6 +37,7 @@ type Agent struct {
 	Instructions       string             `json:"instructions"`
 	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy         pgtype.UUID        `json:"archived_by"`
+	ReportsTo          pgtype.UUID        `json:"reports_to"`
 }
 
 type AgentRuntime struct {

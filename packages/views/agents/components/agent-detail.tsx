@@ -50,12 +50,14 @@ const detailTabs: { id: DetailTab; label: string; icon: typeof FileText }[] = [
 
 export function AgentDetail({
   agent,
+  agents,
   runtimes,
   onUpdate,
   onArchive,
   onRestore,
 }: {
   agent: Agent;
+  agents: Agent[];
   runtimes: RuntimeDevice[];
   onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
@@ -161,6 +163,7 @@ export function AgentDetail({
         {activeTab === "settings" && (
           <SettingsTab
             agent={agent}
+            agents={agents}
             runtimes={runtimes}
             onSave={(updates) => onUpdate(agent.id, updates)}
           />

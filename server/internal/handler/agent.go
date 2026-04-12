@@ -15,6 +15,47 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// validateSupervisor checks that a candidate supervisor agent exists, is in
+// the given workspace, and is not archived. Used when creating/updating an
+// agent's reports_to link. Returns the validated supervisor record so the
+// caller can reuse it without an extra DB roundtrip.
+//
+// NOTE: this does NOT check for cycles — that's the caller's job on updates,
+// and is impossible on creates (a brand-new agent has no descendants yet).
+func (h *Handler) validateSupervisor(r *http.Request, supervisorID string, workspaceID pgtype.UUID) (db.Agent, error) {
+	sup, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		ID:          parseUUID(supervisorID),
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Agent{}, fmt.Errorf("supervisor not found in workspace")
+	}
+	if sup.ArchivedAt.Valid {
+		return db.Agent{}, fmt.Errorf("supervisor is archived")
+	}
+	return sup, nil
+}
+
+// checkNoSupervisorCycle guards against creating a loop in the reports_to
+// graph. It rejects the change if the proposed supervisor is a transitive
+// descendant of the agent being updated (e.g. A -> B -> C, then trying to
+// set A.reports_to = C would make C -> A -> B -> C).
+func (h *Handler) checkNoSupervisorCycle(r *http.Request, agentID, supervisorID pgtype.UUID) error {
+	if !agentID.Valid || !supervisorID.Valid {
+		return nil
+	}
+	descendants, err := h.Queries.ListAgentDescendants(r.Context(), agentID)
+	if err != nil {
+		return fmt.Errorf("failed to check supervisor cycle: %w", err)
+	}
+	for _, d := range descendants {
+		if d.Bytes == supervisorID.Bytes {
+			return fmt.Errorf("cannot set supervisor: would create a cycle in the agent hierarchy")
+		}
+	}
+	return nil
+}
+
 // validateRuntimeConfig enforces the runtime_config schema. Returns a non-nil
 // error if the payload is malformed. Note: the path is NOT checked for
 // existence here because runtime_config.workdir_path refers to the daemon's
@@ -83,6 +124,7 @@ type AgentResponse struct {
 	Status             string          `json:"status"`
 	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
 	OwnerID            *string         `json:"owner_id"`
+	ReportsTo          *string         `json:"reports_to"`
 	Skills             []SkillResponse `json:"skills"`
 	CreatedAt          string          `json:"created_at"`
 	UpdatedAt          string          `json:"updated_at"`
@@ -113,6 +155,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
 		OwnerID:            uuidToPtr(a.OwnerID),
+		ReportsTo:          uuidToPtr(a.ReportsTo),
 		Skills:             []SkillResponse{},
 		CreatedAt:          timestampToString(a.CreatedAt),
 		UpdatedAt:          timestampToString(a.UpdatedAt),
@@ -263,6 +306,7 @@ type CreateAgentRequest struct {
 	RuntimeConfig      any     `json:"runtime_config"`
 	Visibility         string  `json:"visibility"`
 	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
+	ReportsTo          *string `json:"reports_to"`
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -313,6 +357,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		rc = []byte("{}")
 	}
 
+	// Optional: validate supervisor reference. Cycle check is skipped here
+	// because a fresh agent has no descendants yet.
+	var reportsTo pgtype.UUID
+	if req.ReportsTo != nil && *req.ReportsTo != "" {
+		if _, err := h.validateSupervisor(r, *req.ReportsTo, parseUUID(workspaceID)); err != nil {
+			writeError(w, http.StatusBadRequest, "reports_to: "+err.Error())
+			return
+		}
+		reportsTo = parseUUID(*req.ReportsTo)
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
@@ -325,6 +380,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            parseUUID(ownerID),
+		ReportsTo:          reportsTo,
 	})
 	if err != nil {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
@@ -356,6 +412,11 @@ type UpdateAgentRequest struct {
 	Visibility         *string `json:"visibility"`
 	Status             *string `json:"status"`
 	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
+	// ReportsTo uses raw JSON so we can distinguish:
+	//   absent             -> leave supervisor unchanged
+	//   explicit null      -> clear supervisor
+	//   "uuid-string"      -> set supervisor
+	ReportsTo json.RawMessage `json:"reports_to,omitempty"`
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -442,6 +503,38 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
+	}
+
+	// Handle supervisor changes separately so we can distinguish "absent
+	// from payload" from "explicit null to clear". len == 0 means the field
+	// was omitted — leave the current link alone.
+	if len(req.ReportsTo) > 0 {
+		var supervisor *string
+		if err := json.Unmarshal(req.ReportsTo, &supervisor); err != nil {
+			writeError(w, http.StatusBadRequest, "reports_to: must be a UUID string or null")
+			return
+		}
+		var newSupervisorID pgtype.UUID
+		if supervisor != nil && *supervisor != "" {
+			if _, err := h.validateSupervisor(r, *supervisor, agent.WorkspaceID); err != nil {
+				writeError(w, http.StatusBadRequest, "reports_to: "+err.Error())
+				return
+			}
+			newSupervisorID = parseUUID(*supervisor)
+			if err := h.checkNoSupervisorCycle(r, agent.ID, newSupervisorID); err != nil {
+				writeError(w, http.StatusBadRequest, "reports_to: "+err.Error())
+				return
+			}
+		}
+		agent, err = h.Queries.SetAgentSupervisor(r.Context(), db.SetAgentSupervisorParams{
+			ID:           agent.ID,
+			SupervisorID: newSupervisorID,
+		})
+		if err != nil {
+			slog.Warn("set supervisor failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to set supervisor: "+err.Error())
+			return
+		}
 	}
 
 	resp := agentToResponse(agent)

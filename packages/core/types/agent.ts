@@ -69,6 +69,11 @@ export interface Agent {
   status: AgentStatus;
   max_concurrent_tasks: number;
   owner_id: string | null;
+  /**
+   * UUID of the agent this one reports to (its supervisor in the org chart),
+   * or null if it has no supervisor. Used to build agent hierarchies.
+   */
+  reports_to: string | null;
   skills: Skill[];
   created_at: string;
   updated_at: string;
@@ -85,6 +90,7 @@ export interface CreateAgentRequest {
   runtime_config?: AgentRuntimeConfig;
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
+  reports_to?: string | null;
 }
 
 export interface UpdateAgentRequest {
@@ -97,6 +103,12 @@ export interface UpdateAgentRequest {
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
+  /**
+   * Supervisor change: absent = no change, null = clear supervisor,
+   * string = set supervisor to that agent UUID. The server distinguishes
+   * these via raw JSON inspection.
+   */
+  reports_to?: string | null;
 }
 
 // Skills

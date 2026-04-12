@@ -95,7 +95,7 @@ func (q *Queries) GetRuntimeUsageSummary(ctx context.Context, runtimeID pgtype.U
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT id, runtime_id, date, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at FROM runtime_usage
 WHERE runtime_id = $1
-  AND date >= $2
+  AND date >= $2::date
 ORDER BY date DESC
 `
 

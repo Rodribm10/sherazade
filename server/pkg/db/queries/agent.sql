@@ -20,8 +20,8 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    instructions, reports_to
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -39,6 +39,33 @@ UPDATE agent SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: SetAgentSupervisor :one
+-- Sets or clears the reports_to supervisor. Passing NULL clears the link.
+-- Use this explicitly when you want to change the hierarchy, separate
+-- from the generic UpdateAgent so COALESCE can't clobber a deliberate
+-- NULL with the existing value.
+UPDATE agent SET
+    reports_to = sqlc.narg('supervisor_id')::uuid,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ListAgentDescendants :many
+-- Returns all transitive descendants of the given agent by walking the
+-- reports_to graph downward. Used to detect cycles when changing a
+-- supervisor: if the target supervisor is a descendant of the current
+-- agent, accepting the change would create a loop.
+WITH RECURSIVE tree(id, reports_to) AS (
+    SELECT a.id, a.reports_to
+    FROM agent a
+    WHERE a.reports_to = $1
+  UNION ALL
+    SELECT a.id, a.reports_to
+    FROM agent a
+    INNER JOIN tree t ON a.reports_to = t.id
+)
+SELECT id FROM tree;
 
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
