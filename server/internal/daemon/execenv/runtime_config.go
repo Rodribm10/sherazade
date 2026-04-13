@@ -71,21 +71,25 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// tasks to the mentioned agent automatically.
 	if ctx.Supervisor != nil || len(ctx.Subordinates) > 0 {
 		b.WriteString("## Your Team\n\n")
-		b.WriteString("You are part of an agent hierarchy. Delegate work up or down by @mentioning the right teammate in a comment — mentions automatically spawn a task for the mentioned agent.\n\n")
+		b.WriteString("You are part of an agent hierarchy with a supervisor and/or direct reports. **You are expected to delegate work that fits a teammate's role better than yours** — doing everything yourself when a subordinate could handle it is a bug, not a feature. Use @mentions in issue comments: mentions automatically spawn a task for the mentioned agent, who reads the issue, executes, and replies on the same thread.\n\n")
 
 		if ctx.Supervisor != nil {
 			s := ctx.Supervisor
-			b.WriteString("**You report to:**\n")
+			b.WriteString("### You report to\n\n")
 			fmt.Fprintf(&b, "- **%s** — `[@%s](mention://agent/%s)`", s.Name, s.Name, s.ID)
 			if s.Description != "" {
 				fmt.Fprintf(&b, " — %s", s.Description)
 			}
-			b.WriteString("\n")
-			b.WriteString("  _When you need strategic direction, approval, or escalation, mention your supervisor in a comment._\n\n")
+			b.WriteString("\n\n")
+			b.WriteString("**Escalate to your supervisor when:**\n")
+			b.WriteString("- The issue requires a strategic decision you don't have authority to make\n")
+			b.WriteString("- Work you delegated downward is complete and needs final approval\n")
+			b.WriteString("- You discover blocking problems (missing access, conflicting priorities, scope creep)\n")
+			b.WriteString("- You finished what was asked and want confirmation before closing\n\n")
 		}
 
 		if len(ctx.Subordinates) > 0 {
-			b.WriteString("**Direct reports (delegate downward):**\n")
+			b.WriteString("### Your direct reports (delegate downward)\n\n")
 			for _, sub := range ctx.Subordinates {
 				fmt.Fprintf(&b, "- **%s** — `[@%s](mention://agent/%s)`", sub.Name, sub.Name, sub.ID)
 				if sub.Description != "" {
@@ -93,13 +97,21 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 				}
 				b.WriteString("\n")
 			}
-			b.WriteString("  _When a task matches one of your subordinates' specialties, mention them in a comment on the current issue instead of doing it yourself._\n\n")
-			b.WriteString("**How delegation works in practice:**\n")
-			b.WriteString("1. Read the issue via `multica issue get <id> --output json`\n")
-			b.WriteString("2. Decide if the work fits your role or a subordinate's\n")
-			b.WriteString("3. If delegating, post a comment mentioning the right subordinate with clear instructions: `multica issue comment add <issue-id> --content \"[@Name](mention://agent/<id>) <detailed task>\"`\n")
-			b.WriteString("4. The mentioned agent picks up the task automatically and replies on the same issue\n")
-			b.WriteString("5. You can follow up, review their reply, and escalate to your supervisor when the outcome is ready\n\n")
+			b.WriteString("\n")
+			b.WriteString("**Delegation checklist — run this BEFORE doing the work yourself:**\n")
+			b.WriteString("1. Read the issue carefully\n")
+			b.WriteString("2. Ask: \"does any of my direct reports' specialties fit this work better than my role?\"\n")
+			b.WriteString("3. If yes → delegate. If no → do it yourself, then report to your supervisor if relevant\n")
+			b.WriteString("4. When delegating, be specific in the comment — include context, acceptance criteria, files/areas involved\n\n")
+			b.WriteString("**How to delegate (exact command):**\n\n")
+			first := ctx.Subordinates[0]
+			fmt.Fprintf(&b, "```\nmultica issue comment add <issue-id> --content \"[@%s](mention://agent/%s) <clear task with context>\"\n```\n\n", first.Name, first.ID)
+			b.WriteString("The subordinate picks up the mention automatically, executes, and replies on the same issue thread. You can follow up with more mentions, review their output, and escalate to your supervisor when done.\n\n")
+			b.WriteString("**Example flow:** Issue \"Add dark mode toggle to InAudit\" assigned to you →\n")
+			b.WriteString("1. You recognize this is UI work\n")
+			fmt.Fprintf(&b, "2. You post: `[@%s](mention://agent/%s) Implement a dark mode toggle in the InAudit header. Acceptance: persists per user, respects system default on first load, accessible via keyboard shortcut.`\n", first.Name, first.ID)
+			b.WriteString("3. The subordinate takes over, makes the changes, and replies\n")
+			b.WriteString("4. You review their reply, ask for adjustments if needed, then report completion to your supervisor (if you have one)\n\n")
 		}
 	}
 
