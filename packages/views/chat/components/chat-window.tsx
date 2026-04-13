@@ -162,12 +162,20 @@ export function ChatWindow() {
       let sessionId = activeSessionId;
 
       if (!sessionId) {
+        // Chat-first: create issue + session + initial task in one call.
         const session = await createSession.mutateAsync({
           agent_id: activeAgent.id,
-          title: content.slice(0, 50),
+          title: content.slice(0, 80),
+          create_issue: true,
+          prompt: content,
         });
         sessionId = session.id;
         setActiveSession(sessionId);
+        if (session.initial_task_id) {
+          setPendingTask(session.initial_task_id);
+        }
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        return;
       }
 
       // Optimistic: show user message immediately.

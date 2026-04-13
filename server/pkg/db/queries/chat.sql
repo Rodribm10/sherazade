@@ -1,7 +1,22 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-VALUES ($1, $2, $3, $4)
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, issue_id)
+VALUES ($1, $2, $3, $4, sqlc.narg('issue_id')::uuid)
 RETURNING *;
+
+-- name: SetChatSessionIssue :exec
+-- Link an existing chat session to a freshly created issue. Used by
+-- the new "chat-first" flow when we create the issue after the session
+-- row exists.
+UPDATE chat_session SET issue_id = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: GetChatSessionByIssue :one
+-- Reverse lookup: given an issue, find its chat_session (if any).
+-- Used at claim time to decide whether the agent should touch the
+-- issue's status or leave it manual (Kanban-driven).
+SELECT * FROM chat_session
+WHERE issue_id = $1
+LIMIT 1;
 
 -- name: GetChatSession :one
 SELECT * FROM chat_session

@@ -900,6 +900,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		ChatSessionID:     task.ChatSessionID,
 		Supervisor:        convertTeamMemberForEnv(task.Agent),
 		Subordinates:      convertSubordinatesForEnv(task.Agent),
+		ManualStatus:      task.Agent != nil && task.Agent.ManualStatus,
 	}
 
 	// Read per-agent runtime config to decide workdir mode.

@@ -232,6 +232,11 @@ type TaskAgentData struct {
 	Supervisor *AgentTeamMember `json:"supervisor,omitempty"`
 	// Subordinates are the agents whose reports_to points at this agent.
 	Subordinates []AgentTeamMember `json:"subordinates,omitempty"`
+	// ManualStatus is true when the task is on a chat-driven issue —
+	// the human manages status through the Kanban, so the agent must
+	// not call `multica issue status`. The daemon honors this by
+	// injecting a directive into the generated CLAUDE.md.
+	ManualStatus bool `json:"manual_status,omitempty"`
 }
 
 // AgentTeamMember is a light projection of an agent used to tell the

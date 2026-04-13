@@ -51,6 +51,10 @@ type AgentData struct {
 	// Subordinates are the direct reports of this agent in the org
 	// chart — candidates to @mention when delegating work downward.
 	Subordinates []AgentTeamMember `json:"subordinates,omitempty"`
+	// ManualStatus is true when the task runs on a chat-driven issue.
+	// The human drives the Kanban, so the agent MUST NOT call
+	// `multica issue status`.
+	ManualStatus bool `json:"manual_status,omitempty"`
 }
 
 // AgentTeamMember is a light projection of an agent used to render the

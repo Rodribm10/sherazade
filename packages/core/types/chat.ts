@@ -5,8 +5,12 @@ export interface ChatSession {
   creator_id: string;
   title: string;
   status: "active" | "archived";
+  issue_id: string | null;
   created_at: string;
   updated_at: string;
+  // Populated only in the chat-first create response, so the caller can
+  // show a running indicator until the first agent reply lands.
+  initial_task_id?: string;
 }
 
 export interface ChatMessage {

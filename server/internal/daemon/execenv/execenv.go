@@ -53,6 +53,9 @@ type TaskContextForEnv struct {
 	// Subordinates are the direct reports of the agent. Rendered in
 	// the same "Your team" section as downward delegation targets.
 	Subordinates []TeamMemberForEnv
+	// ManualStatus is true for chat-driven issues whose status is
+	// managed by the human through the Kanban.
+	ManualStatus bool
 }
 
 // TeamMemberForEnv is the execenv-local projection of an agent used to

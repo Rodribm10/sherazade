@@ -160,13 +160,24 @@ export function ChatPage() {
       if (!activeAgent) return;
       let sessionId = activeSessionId;
 
+      // Chat-first flow: the very first message of a new chat creates
+      // an issue + session in one call, and the backend enqueues the
+      // initial task from the issue description. No separate
+      // sendChatMessage call needed here — the prompt IS the task.
       if (!sessionId) {
         const session = await createSession.mutateAsync({
           agent_id: activeAgent.id,
-          title: content.slice(0, 50),
+          title: content.slice(0, 80),
+          create_issue: true,
+          prompt: content,
         });
         sessionId = session.id;
         setActiveSession(sessionId);
+        if (session.initial_task_id) {
+          setPendingTask(session.initial_task_id);
+        }
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        return;
       }
 
       const optimistic: ChatMessage = {

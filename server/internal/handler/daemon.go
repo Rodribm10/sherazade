@@ -388,6 +388,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		// Chat-driven issues have manual status management — the
+		// human decides when the card moves in the Kanban. Let the
+		// daemon know so it tells the agent not to call `multica
+		// issue status`.
+		if task.IssueID.Valid {
+			if _, err := h.Queries.GetChatSessionByIssue(r.Context(), task.IssueID); err == nil {
+				agentData.ManualStatus = true
+			}
+		}
 		resp.Agent = agentData
 	}
 

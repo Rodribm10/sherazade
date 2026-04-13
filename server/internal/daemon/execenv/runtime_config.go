@@ -166,6 +166,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
+	} else if ctx.ManualStatus {
+		// Chat-driven issue: the human drives the Kanban manually.
+		b.WriteString("**This issue was created from a chat.** The human manages its status through the Kanban board.\n\n")
+		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `multica issue comment list %s --output json` to read the conversation so far\n", ctx.IssueID)
+		b.WriteString("3. Do the work and post your reply with `multica issue comment add`\n")
+		b.WriteString("4. **Do NOT call `multica issue status`** — the human moves the card on the Kanban. Status is not yours to touch on chat-driven issues.\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a comment.** Your primary job is to respond.\n\n")

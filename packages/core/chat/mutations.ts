@@ -8,11 +8,17 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string }) =>
-      api.createChatSession(data),
+    mutationFn: (data: {
+      agent_id: string;
+      title?: string;
+      create_issue?: boolean;
+      prompt?: string;
+    }) => api.createChatSession(data),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
       qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+      // Kanban and issue list — chat-first flow creates an issue.
+      qc.invalidateQueries({ queryKey: ["issues"] });
     },
   });
 }
