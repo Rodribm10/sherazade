@@ -115,7 +115,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:   agent.ID,
-		CreatorType:  "user",
+		CreatorType:  "member",
 		CreatorID:    parseUUID(userID),
 		Number:       issueNumber,
 	})
