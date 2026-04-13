@@ -898,6 +898,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 		AgentSkills:       convertSkillsForEnv(skills),
 		Repos:             convertReposForEnv(task.Repos),
 		ChatSessionID:     task.ChatSessionID,
+		Supervisor:        convertTeamMemberForEnv(task.Agent),
+		Subordinates:      convertSubordinatesForEnv(task.Agent),
 	}
 
 	// Read per-agent runtime config to decide workdir mode.
@@ -1223,6 +1225,32 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description}
+	}
+	return result
+}
+
+func convertTeamMemberForEnv(agent *AgentData) *execenv.TeamMemberForEnv {
+	if agent == nil || agent.Supervisor == nil {
+		return nil
+	}
+	return &execenv.TeamMemberForEnv{
+		ID:          agent.Supervisor.ID,
+		Name:        agent.Supervisor.Name,
+		Description: agent.Supervisor.Description,
+	}
+}
+
+func convertSubordinatesForEnv(agent *AgentData) []execenv.TeamMemberForEnv {
+	if agent == nil || len(agent.Subordinates) == 0 {
+		return nil
+	}
+	result := make([]execenv.TeamMemberForEnv, len(agent.Subordinates))
+	for i, s := range agent.Subordinates {
+		result[i] = execenv.TeamMemberForEnv{
+			ID:          s.ID,
+			Name:        s.Name,
+			Description: s.Description,
+		}
 	}
 	return result
 }

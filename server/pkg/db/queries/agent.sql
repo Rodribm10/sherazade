@@ -81,6 +81,45 @@ UPDATE agent SET
 WHERE id = $1
 RETURNING *;
 
+-- name: ListAgentTeamMembers :many
+-- Returns the agent's direct team: its supervisor (if any) + its direct
+-- reports. Supervisor is marked with role='supervisor', direct reports
+-- with role='subordinate'. Used to inject the "Your team" section into
+-- the agent's CLAUDE.md at task claim time so the agent knows who it
+-- can delegate to via @mention.
+SELECT
+    a.id,
+    a.name,
+    a.description,
+    CASE
+        WHEN a.id = (SELECT b.reports_to FROM agent b WHERE b.id = $1) THEN 'supervisor'
+        ELSE 'subordinate'
+    END AS relationship
+FROM agent a
+WHERE a.archived_at IS NULL
+  AND (
+      a.id = (SELECT b.reports_to FROM agent b WHERE b.id = $1)
+      OR a.reports_to = $1
+  )
+ORDER BY relationship, a.name;
+
+-- name: GetAgentChainOfCommand :many
+-- Walks up the reports_to chain from the given agent, returning each
+-- ancestor in order (direct supervisor first, grandparent next, etc).
+-- Capped at 50 to defend against corrupt data. Used for permission
+-- checks and to answer "who is above this agent?".
+WITH RECURSIVE chain(id, name, description, reports_to, depth) AS (
+    SELECT a.id, a.name, a.description, a.reports_to, 0
+    FROM agent a
+    WHERE a.id = $1
+  UNION ALL
+    SELECT a.id, a.name, a.description, a.reports_to, c.depth + 1
+    FROM agent a
+    INNER JOIN chain c ON a.id = c.reports_to
+    WHERE c.depth < 50 AND a.archived_at IS NULL
+)
+SELECT id, name, description, depth FROM chain WHERE depth > 0 ORDER BY depth;
+
 -- name: ListAgentDescendants :many
 -- Returns all transitive descendants of the given agent by walking the
 -- reports_to graph downward. Used to detect cycles when changing a

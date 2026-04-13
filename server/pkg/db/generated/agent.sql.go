@@ -501,6 +501,56 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 	return i, err
 }
 
+const getAgentChainOfCommand = `-- name: GetAgentChainOfCommand :many
+WITH RECURSIVE chain(id, name, description, reports_to, depth) AS (
+    SELECT a.id, a.name, a.description, a.reports_to, 0
+    FROM agent a
+    WHERE a.id = $1
+  UNION ALL
+    SELECT a.id, a.name, a.description, a.reports_to, c.depth + 1
+    FROM agent a
+    INNER JOIN chain c ON a.id = c.reports_to
+    WHERE c.depth < 50 AND a.archived_at IS NULL
+)
+SELECT id, name, description, depth FROM chain WHERE depth > 0 ORDER BY depth
+`
+
+type GetAgentChainOfCommandRow struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Depth       int32       `json:"depth"`
+}
+
+// Walks up the reports_to chain from the given agent, returning each
+// ancestor in order (direct supervisor first, grandparent next, etc).
+// Capped at 50 to defend against corrupt data. Used for permission
+// checks and to answer "who is above this agent?".
+func (q *Queries) GetAgentChainOfCommand(ctx context.Context, id pgtype.UUID) ([]GetAgentChainOfCommandRow, error) {
+	rows, err := q.db.Query(ctx, getAgentChainOfCommand, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAgentChainOfCommandRow{}
+	for rows.Next() {
+		var i GetAgentChainOfCommandRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Depth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, reports_to, budget_monthly_cents, spent_monthly_cents, budget_period_start, paused_at, pause_reason FROM agent
 WHERE id = $1 AND workspace_id = $2
@@ -760,6 +810,61 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 			&i.WorkDir,
 			&i.TriggerCommentID,
 			&i.ChatSessionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentTeamMembers = `-- name: ListAgentTeamMembers :many
+SELECT
+    a.id,
+    a.name,
+    a.description,
+    CASE
+        WHEN a.id = (SELECT b.reports_to FROM agent b WHERE b.id = $1) THEN 'supervisor'
+        ELSE 'subordinate'
+    END AS relationship
+FROM agent a
+WHERE a.archived_at IS NULL
+  AND (
+      a.id = (SELECT b.reports_to FROM agent b WHERE b.id = $1)
+      OR a.reports_to = $1
+  )
+ORDER BY relationship, a.name
+`
+
+type ListAgentTeamMembersRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Name         string      `json:"name"`
+	Description  string      `json:"description"`
+	Relationship string      `json:"relationship"`
+}
+
+// Returns the agent's direct team: its supervisor (if any) + its direct
+// reports. Supervisor is marked with role='supervisor', direct reports
+// with role='subordinate'. Used to inject the "Your team" section into
+// the agent's CLAUDE.md at task claim time so the agent knows who it
+// can delegate to via @mention.
+func (q *Queries) ListAgentTeamMembers(ctx context.Context, id pgtype.UUID) ([]ListAgentTeamMembersRow, error) {
+	rows, err := q.db.Query(ctx, listAgentTeamMembers, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentTeamMembersRow{}
+	for rows.Next() {
+		var i ListAgentTeamMembersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Relationship,
 		); err != nil {
 			return nil, err
 		}

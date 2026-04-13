@@ -228,6 +228,19 @@ type TaskAgentData struct {
 	// column, passed through to the daemon so it can honor per-agent runtime
 	// knobs (e.g. workdir_mode = "direct" to edit real host files).
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
+	// Supervisor is the direct manager (reports_to), if any.
+	Supervisor *AgentTeamMember `json:"supervisor,omitempty"`
+	// Subordinates are the agents whose reports_to points at this agent.
+	Subordinates []AgentTeamMember `json:"subordinates,omitempty"`
+}
+
+// AgentTeamMember is a light projection of an agent used to tell the
+// daemon who sits around a given agent in the org chart. Enough info to
+// generate @mention markdown without the full agent row.
+type AgentTeamMember struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -678,6 +691,47 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ChainOfCommandEntry is one ancestor in an agent's reports_to chain.
+// depth=1 is the direct supervisor, depth=2 the grand-supervisor, etc.
+type ChainOfCommandEntry struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Depth       int32  `json:"depth"`
+}
+
+// GetAgentChainOfCommand returns the upward chain of supervisors for
+// the given agent, starting at the direct manager. Used by the UI to
+// render breadcrumbs ("Dev Frontend → Tech Lead → Diretor") and as a
+// foundation for future permission checks (supervisors have access to
+// their subordinates' resources, same pattern Paperclip uses).
+func (h *Handler) GetAgentChainOfCommand(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.GetAgentChainOfCommand(r.Context(), agent.ID)
+	if err != nil {
+		slog.Warn("get chain of command failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load chain of command")
+		return
+	}
+
+	resp := make([]ChainOfCommandEntry, 0, len(rows))
+	for _, row := range rows {
+		resp = append(resp, ChainOfCommandEntry{
+			ID:          uuidToString(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			Depth:       row.Depth,
+		})
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

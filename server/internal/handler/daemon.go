@@ -359,17 +359,36 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build response with fresh agent data (name + skills).
+	// Build response with fresh agent data (name + skills + team).
 	resp := taskToResponse(*task)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		resp.Agent = &TaskAgentData{
+		agentData := &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
 			Instructions:  agent.Instructions,
 			Skills:        skills,
 			RuntimeConfig: json.RawMessage(agent.RuntimeConfig),
 		}
+		// Inject the agent's direct team (supervisor + direct reports)
+		// so the daemon can teach the spawned CLI about its hierarchy
+		// via the generated CLAUDE.md.
+		if team, err := h.Queries.ListAgentTeamMembers(r.Context(), task.AgentID); err == nil {
+			for _, m := range team {
+				tm := AgentTeamMember{
+					ID:          uuidToString(m.ID),
+					Name:        m.Name,
+					Description: m.Description,
+				}
+				if m.Relationship == "supervisor" {
+					supCopy := tm
+					agentData.Supervisor = &supCopy
+				} else {
+					agentData.Subordinates = append(agentData.Subordinates, tm)
+				}
+			}
+		}
+		resp.Agent = agentData
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.

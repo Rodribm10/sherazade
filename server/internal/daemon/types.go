@@ -39,11 +39,27 @@ type Task struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`
-	Instructions  string             `json:"instructions"`
-	Skills        []SkillData        `json:"skills"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Instructions  string              `json:"instructions"`
+	Skills        []SkillData         `json:"skills"`
 	RuntimeConfig *AgentRuntimeConfig `json:"runtime_config,omitempty"`
+	// Supervisor is the agent this one reports to (if any). Used to
+	// inject "Your team" into the meta skill so the spawned CLI knows
+	// who to @mention when delegating work upward.
+	Supervisor *AgentTeamMember `json:"supervisor,omitempty"`
+	// Subordinates are the direct reports of this agent in the org
+	// chart — candidates to @mention when delegating work downward.
+	Subordinates []AgentTeamMember `json:"subordinates,omitempty"`
+}
+
+// AgentTeamMember is a light projection of an agent used to render the
+// "Your team" section in CLAUDE.md at task time. Mirrors the server-side
+// handler.AgentTeamMember DTO.
+type AgentTeamMember struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // AgentRuntimeConfig mirrors the JSONB `runtime_config` column of the agents

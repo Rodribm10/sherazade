@@ -46,6 +46,21 @@ type TaskContextForEnv struct {
 	AgentSkills       []SkillContextForEnv
 	Repos             []RepoContextForEnv // workspace repos available for checkout
 	ChatSessionID     string              // non-empty for chat tasks
+	// Supervisor is the optional manager of this agent (reports_to).
+	// When present, the meta skill markdown gains a "You report to ..."
+	// line telling the CLI who to @mention for upward delegation.
+	Supervisor *TeamMemberForEnv
+	// Subordinates are the direct reports of the agent. Rendered in
+	// the same "Your team" section as downward delegation targets.
+	Subordinates []TeamMemberForEnv
+}
+
+// TeamMemberForEnv is the execenv-local projection of an agent used to
+// render the team-awareness block in the generated CLAUDE.md / AGENTS.md.
+type TeamMemberForEnv struct {
+	ID          string
+	Name        string
+	Description string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

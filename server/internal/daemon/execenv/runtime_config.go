@@ -63,6 +63,46 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Inject the agent's team — supervisor and direct reports — so it
+	// knows who to @mention when delegating work up or down the chain.
+	// This is what turns the `reports_to` field from metadata into a
+	// live delegation mechanism: the agent has concrete IDs ready to
+	// paste into comments, and the mention system already dispatches
+	// tasks to the mentioned agent automatically.
+	if ctx.Supervisor != nil || len(ctx.Subordinates) > 0 {
+		b.WriteString("## Your Team\n\n")
+		b.WriteString("You are part of an agent hierarchy. Delegate work up or down by @mentioning the right teammate in a comment — mentions automatically spawn a task for the mentioned agent.\n\n")
+
+		if ctx.Supervisor != nil {
+			s := ctx.Supervisor
+			b.WriteString("**You report to:**\n")
+			fmt.Fprintf(&b, "- **%s** — `[@%s](mention://agent/%s)`", s.Name, s.Name, s.ID)
+			if s.Description != "" {
+				fmt.Fprintf(&b, " — %s", s.Description)
+			}
+			b.WriteString("\n")
+			b.WriteString("  _When you need strategic direction, approval, or escalation, mention your supervisor in a comment._\n\n")
+		}
+
+		if len(ctx.Subordinates) > 0 {
+			b.WriteString("**Direct reports (delegate downward):**\n")
+			for _, sub := range ctx.Subordinates {
+				fmt.Fprintf(&b, "- **%s** — `[@%s](mention://agent/%s)`", sub.Name, sub.Name, sub.ID)
+				if sub.Description != "" {
+					fmt.Fprintf(&b, " — %s", sub.Description)
+				}
+				b.WriteString("\n")
+			}
+			b.WriteString("  _When a task matches one of your subordinates' specialties, mention them in a comment on the current issue instead of doing it yourself._\n\n")
+			b.WriteString("**How delegation works in practice:**\n")
+			b.WriteString("1. Read the issue via `multica issue get <id> --output json`\n")
+			b.WriteString("2. Decide if the work fits your role or a subordinate's\n")
+			b.WriteString("3. If delegating, post a comment mentioning the right subordinate with clear instructions: `multica issue comment add <issue-id> --content \"[@Name](mention://agent/<id>) <detailed task>\"`\n")
+			b.WriteString("4. The mentioned agent picks up the task automatically and replies on the same issue\n")
+			b.WriteString("5. You can follow up, review their reply, and escalate to your supervisor when the outcome is ready\n\n")
+		}
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Always use `--output json` for all read commands** to get structured data with full IDs.\n\n")
 	b.WriteString("### Read\n")
