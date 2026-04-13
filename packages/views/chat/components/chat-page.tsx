@@ -32,7 +32,8 @@ import { useChatStore } from "@multica/core/chat";
 import { useWS } from "@multica/core/realtime";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
-import { StatusPicker } from "@multica/views/issues/components";
+import { StatusPicker, StatusIcon } from "@multica/views/issues/components";
+import { STATUS_CONFIG } from "@multica/core/issues/config";
 import type {
   TaskMessagePayload,
   ChatDonePayload,
@@ -175,6 +176,14 @@ export function ChatPage() {
       if (!session?.issue_id) return;
       if (p.comment.issue_id !== session.issue_id) return;
       qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
+      qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+    });
+
+    // Status changes (manual via picker, agent, or elsewhere) need to
+    // refresh the sidebar so the per-session color stays accurate.
+    const unsubIssue = subscribe("issue:updated", () => {
+      qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
     });
 
     return () => {
@@ -183,6 +192,7 @@ export function ChatPage() {
       unsubCompleted();
       unsubFailed();
       unsubComment();
+      unsubIssue();
     };
   }, [subscribe, addTimelineItem, clearTimeline, setPendingTask, qc, wsId]);
 
@@ -439,18 +449,26 @@ function SessionItem({
   onArchive?: (e: React.MouseEvent) => void;
 }) {
   const timeAgo = formatTimeAgo(session.updated_at);
+  const issueStatus = session.issue_status as IssueStatus | undefined;
+  const statusCfg = issueStatus ? STATUS_CONFIG[issueStatus] : null;
 
   return (
     <button
       onClick={onSelect}
-      className={`group flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/50 ${
+      className={`group relative flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-accent/50 ${
         isActive ? "bg-accent/30" : ""
       }`}
     >
-      <Avatar className="size-6 shrink-0 mt-0.5">
+      {statusCfg && (
+        <span
+          className={`absolute left-0 top-2 bottom-2 w-0.5 rounded-r ${statusCfg.dividerColor}`}
+          aria-hidden
+        />
+      )}
+      <Avatar className="size-7 shrink-0 mt-0.5">
         {agent?.avatar_url && <AvatarImage src={agent.avatar_url} />}
         <AvatarFallback className="bg-purple-100 text-purple-700 text-[10px]">
-          <Bot className="size-3" />
+          <Bot className="size-3.5" />
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
@@ -468,8 +486,16 @@ function SessionItem({
               {agent.name}
             </span>
           )}
-          <span className="text-xs text-muted-foreground/60">{timeAgo}</span>
+          <span className="text-xs text-muted-foreground/60">· {timeAgo}</span>
         </div>
+        {statusCfg && issueStatus && (
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <StatusIcon status={issueStatus} className="size-3 shrink-0" />
+            <span className={`text-xs font-medium ${statusCfg.iconColor}`}>
+              {statusCfg.label}
+            </span>
+          </div>
+        )}
       </div>
       {onArchive && (
         <button

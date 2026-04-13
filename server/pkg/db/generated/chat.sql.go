@@ -255,9 +255,11 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 }
 
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, issue_id FROM chat_session
-WHERE workspace_id = $1 AND creator_id = $2
-ORDER BY updated_at DESC
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.issue_id, i.status AS issue_status
+FROM chat_session cs
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+ORDER BY cs.updated_at DESC
 `
 
 type ListAllChatSessionsByCreatorParams struct {
@@ -265,15 +267,30 @@ type ListAllChatSessionsByCreatorParams struct {
 	CreatorID   pgtype.UUID `json:"creator_id"`
 }
 
-func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllChatSessionsByCreatorParams) ([]ChatSession, error) {
+type ListAllChatSessionsByCreatorRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssueStatus pgtype.Text        `json:"issue_status"`
+}
+
+func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllChatSessionsByCreatorParams) ([]ListAllChatSessionsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listAllChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChatSession{}
+	items := []ListAllChatSessionsByCreatorRow{}
 	for rows.Next() {
-		var i ChatSession
+		var i ListAllChatSessionsByCreatorRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -286,6 +303,7 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IssueID,
+			&i.IssueStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -331,9 +349,11 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatSessionsByCreator = `-- name: ListChatSessionsByCreator :many
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, issue_id FROM chat_session
-WHERE workspace_id = $1 AND creator_id = $2 AND status = 'active'
-ORDER BY updated_at DESC
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.issue_id, i.status AS issue_status
+FROM chat_session cs
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+ORDER BY cs.updated_at DESC
 `
 
 type ListChatSessionsByCreatorParams struct {
@@ -341,15 +361,30 @@ type ListChatSessionsByCreatorParams struct {
 	CreatorID   pgtype.UUID `json:"creator_id"`
 }
 
-func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSessionsByCreatorParams) ([]ChatSession, error) {
+type ListChatSessionsByCreatorRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	CreatorID   pgtype.UUID        `json:"creator_id"`
+	Title       string             `json:"title"`
+	SessionID   pgtype.Text        `json:"session_id"`
+	WorkDir     pgtype.Text        `json:"work_dir"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssueStatus pgtype.Text        `json:"issue_status"`
+}
+
+func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSessionsByCreatorParams) ([]ListChatSessionsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChatSession{}
+	items := []ListChatSessionsByCreatorRow{}
 	for rows.Next() {
-		var i ChatSession
+		var i ListChatSessionsByCreatorRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -362,6 +397,7 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.IssueID,
+			&i.IssueStatus,
 		); err != nil {
 			return nil, err
 		}

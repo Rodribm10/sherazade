@@ -27,14 +27,18 @@ SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListChatSessionsByCreator :many
-SELECT * FROM chat_session
-WHERE workspace_id = $1 AND creator_id = $2 AND status = 'active'
-ORDER BY updated_at DESC;
+SELECT cs.*, i.status AS issue_status
+FROM chat_session cs
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+ORDER BY cs.updated_at DESC;
 
 -- name: ListAllChatSessionsByCreator :many
-SELECT * FROM chat_session
-WHERE workspace_id = $1 AND creator_id = $2
-ORDER BY updated_at DESC;
+SELECT cs.*, i.status AS issue_status
+FROM chat_session cs
+LEFT JOIN issue i ON i.id = cs.issue_id
+WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+ORDER BY cs.updated_at DESC;
 
 -- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()

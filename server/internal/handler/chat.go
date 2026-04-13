@@ -169,27 +169,59 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 
 	status := r.URL.Query().Get("status")
 
-	var sessions []db.ChatSession
-	var err error
-	if status == "all" {
-		sessions, err = h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
-			CreatorID:   parseUUID(userID),
-		})
-	} else {
-		sessions, err = h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
-			WorkspaceID: parseUUID(workspaceID),
-			CreatorID:   parseUUID(userID),
-		})
+	type row struct {
+		session     db.ChatSession
+		issueStatus pgtype.Text
 	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
-		return
+	var rows []row
+	if status == "all" {
+		res, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
+			WorkspaceID: parseUUID(workspaceID),
+			CreatorID:   parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+			return
+		}
+		for _, r := range res {
+			rows = append(rows, row{
+				session: db.ChatSession{
+					ID: r.ID, WorkspaceID: r.WorkspaceID, AgentID: r.AgentID, CreatorID: r.CreatorID,
+					Title: r.Title, SessionID: r.SessionID, WorkDir: r.WorkDir, Status: r.Status,
+					CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, IssueID: r.IssueID,
+				},
+				issueStatus: r.IssueStatus,
+			})
+		}
+	} else {
+		res, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
+			WorkspaceID: parseUUID(workspaceID),
+			CreatorID:   parseUUID(userID),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list chat sessions")
+			return
+		}
+		for _, r := range res {
+			rows = append(rows, row{
+				session: db.ChatSession{
+					ID: r.ID, WorkspaceID: r.WorkspaceID, AgentID: r.AgentID, CreatorID: r.CreatorID,
+					Title: r.Title, SessionID: r.SessionID, WorkDir: r.WorkDir, Status: r.Status,
+					CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, IssueID: r.IssueID,
+				},
+				issueStatus: r.IssueStatus,
+			})
+		}
 	}
 
-	resp := make([]ChatSessionResponse, len(sessions))
-	for i, s := range sessions {
-		resp[i] = chatSessionToResponse(s)
+	resp := make([]ChatSessionResponse, len(rows))
+	for i, row := range rows {
+		r := chatSessionToResponse(row.session)
+		if row.issueStatus.Valid {
+			s := row.issueStatus.String
+			r.IssueStatus = &s
+		}
+		resp[i] = r
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -530,8 +562,11 @@ type ChatSessionResponse struct {
 	// IssueID is set when this chat session is backed by an issue
 	// (chat-first flow). Null for legacy free-floating chats.
 	IssueID   *string `json:"issue_id"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	// IssueStatus is the current status of the linked issue, included in
+	// list responses so the sidebar can render a color per session.
+	IssueStatus *string `json:"issue_status,omitempty"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 	// InitialTaskID is populated only in the chat-first create response,
 	// so the frontend can show a running indicator until the first reply
 	// lands. Not persisted; omitted on subsequent reads.

@@ -6,6 +6,7 @@ export interface ChatSession {
   title: string;
   status: "active" | "archived";
   issue_id: string | null;
+  issue_status?: string;
   created_at: string;
   updated_at: string;
   // Populated only in the chat-first create response, so the caller can
