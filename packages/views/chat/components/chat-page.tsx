@@ -30,12 +30,17 @@ import {
 import { useCreateChatSession, useArchiveChatSession } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
 import { useWS } from "@multica/core/realtime";
+import { issueDetailOptions } from "@multica/core/issues/queries";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { StatusPicker } from "@multica/views/issues/components";
 import type {
   TaskMessagePayload,
   ChatDonePayload,
+  CommentCreatedPayload,
   Agent,
   ChatMessage,
   ChatSession,
+  IssueStatus,
 } from "@multica/core/types";
 import { ChatMessageList } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
@@ -86,6 +91,16 @@ export function ChatPage() {
     ? allSessions.find((s) => s.id === activeSessionId)
     : null;
   const isSessionArchived = currentSession?.status === "archived";
+  const linkedIssueId = currentSession?.issue_id ?? null;
+
+  // Chat-first sessions are backed by a real issue. Fetch it so we can
+  // render the status picker in the header and let the user drive the
+  // Kanban manually from inside the chat.
+  const { data: linkedIssue } = useQuery({
+    ...issueDetailOptions(wsId, linkedIssueId ?? ""),
+    enabled: !!linkedIssueId,
+  });
+  const updateIssue = useUpdateIssue();
 
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
@@ -147,13 +162,29 @@ export function ChatPage() {
       finalizePending(false);
     });
 
+    // Chat-first sessions render issue comments. When a new comment
+    // lands (agent reply, mention cascade, etc.), refresh the message
+    // list so the user sees it without reloading.
+    const unsubComment = subscribe("comment:created", (payload) => {
+      const p = payload as CommentCreatedPayload;
+      const sid = useChatStore.getState().activeSessionId;
+      if (!sid) return;
+      const session = qc
+        .getQueryData<ChatSession[]>(chatKeys.allSessions(wsId))
+        ?.find((s) => s.id === sid);
+      if (!session?.issue_id) return;
+      if (p.comment.issue_id !== session.issue_id) return;
+      qc.invalidateQueries({ queryKey: chatKeys.messages(sid) });
+    });
+
     return () => {
       unsubMessage();
       unsubDone();
       unsubCompleted();
       unsubFailed();
+      unsubComment();
     };
-  }, [subscribe, addTimelineItem, clearTimeline, setPendingTask, qc]);
+  }, [subscribe, addTimelineItem, clearTimeline, setPendingTask, qc, wsId]);
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -317,11 +348,22 @@ export function ChatPage() {
               activeAgent={activeAgent}
               onSelect={handleSelectAgent}
             />
-            {currentSession && (
-              <span className="truncate text-xs text-muted-foreground">
-                {currentSession.title || "Untitled"}
-              </span>
-            )}
+            <div className="flex items-center gap-3 min-w-0">
+              {currentSession && (
+                <span className="truncate text-xs text-muted-foreground">
+                  {currentSession.title || "Untitled"}
+                </span>
+              )}
+              {linkedIssue && (
+                <StatusPicker
+                  status={linkedIssue.status as IssueStatus}
+                  onUpdate={(updates) => {
+                    if (!updates.status) return;
+                    updateIssue.mutate({ id: linkedIssue.id, status: updates.status });
+                  }}
+                />
+              )}
+            </div>
           </div>
           {hasMessages ? (
             <ChatMessageList

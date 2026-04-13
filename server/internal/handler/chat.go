@@ -313,7 +313,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			AuthorType:  "user",
+			AuthorType:  "member",
 			AuthorID:    parseUUID(userID),
 			Content:     req.Content,
 			Type:        "comment",
