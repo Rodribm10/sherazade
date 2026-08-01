@@ -132,6 +132,13 @@ INSERT INTO issue (
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
 ) RETURNING *;
 
+-- name: GetIssueBySupportOrigin :one
+SELECT * FROM issue
+WHERE workspace_id = @workspace_id
+  AND origin_type = @origin_type
+  AND origin_id = @origin_id
+LIMIT 1;
+
 -- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 

@@ -14,7 +14,7 @@ import (
 func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	var workspaceID, conciergeRuntimeID, conciergeID, reporterOne, reporterTwo string
+	var workspaceID, conciergeRuntimeID, conciergeID, reporterOne, reporterTwo, supportProjectID string
 	if err := testPool.QueryRow(ctx, `INSERT INTO workspace (name, slug, description) VALUES ($1,$2,$3) RETURNING id`, "Support sessions", "support-sessions-"+suffix, "test").Scan(&workspaceID); err != nil {
 		t.Fatal(err)
 	}
@@ -43,10 +43,17 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `INSERT INTO agent (workspace_id,name,description,runtime_mode,runtime_config,runtime_id,visibility,permission_mode,max_concurrent_tasks,owner_id) VALUES ($1,$2,'','cloud','{}',$3,'workspace','public_to',1,$4) RETURNING id`, workspaceID, "Support Concierge", conciergeRuntimeID, reporterOne).Scan(&conciergeID); err != nil {
 		t.Fatal(err)
 	}
+	if err := testPool.QueryRow(ctx, `INSERT INTO project (workspace_id,title) VALUES ($1,'Suporte InAudit') RETURNING id`, workspaceID).Scan(&supportProjectID); err != nil {
+		t.Fatal(err)
+	}
 
 	tokenOne, err := generateTestJWT(reporterOne, "one@example.test", "Reporter One")
 	if err != nil {
 		t.Fatalf("generate reporter one JWT: %v", err)
+	}
+	tokenTwo, err := generateTestJWT(reporterTwo, "two@example.test", "Reporter Two")
+	if err != nil {
+		t.Fatalf("generate reporter two JWT: %v", err)
 	}
 	post := func(token, key string) *http.Response {
 		req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"`+key+`","description":"Preciso de ajuda"}`))
@@ -113,7 +120,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("missing config status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2::text)) WHERE id=$1`, workspaceID, conciergeID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2::text,'project_id',$3::text,'technical_project_id',$3::text)) WHERE id=$1`, workspaceID, conciergeID, supportProjectID); err != nil {
 		t.Fatal(err)
 	}
 	resp = post(tokenOne, "idem-key-0001")
@@ -128,6 +135,13 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if created["public_code"] != "SUP-000001" {
 		t.Fatalf("code=%q", created["public_code"])
 	}
+	var supportIssueCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id=$1 AND origin_type='support_case' AND origin_id=$2`, workspaceID, created["id"]).Scan(&supportIssueCount); err != nil {
+		t.Fatalf("count support issue: %v", err)
+	}
+	if supportIssueCount != 1 {
+		t.Fatalf("support case created %d internal issues, want 1", supportIssueCount)
+	}
 	var previousState *string
 	var newState, transitionActorType, transitionActor string
 	if err := testPool.QueryRow(ctx, `SELECT previous_state, new_state, actor_type, actor_id::text FROM support_case_transition WHERE support_case_id=$1`, created["id"]).Scan(&previousState, &newState, &transitionActorType, &transitionActor); err != nil {
@@ -136,6 +150,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if previousState != nil || newState != "novo" || transitionActorType != "member" || transitionActor != reporterOne {
 		t.Fatalf("initial transition previous=%v new=%q actor=%s/%s", previousState, newState, transitionActorType, transitionActor)
 	}
+	var ownerID, ownerToken, adminToken string
 	for _, role := range []string{"owner", "admin", "member"} {
 		var userID string
 		if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name,email) VALUES ($1,$2) RETURNING id`, role, role+"-support-"+suffix+"@example.test").Scan(&userID); err != nil {
@@ -149,12 +164,89 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("generate %s JWT: %v", role, err)
 		}
+		if role == "owner" {
+			ownerID, ownerToken = userID, token
+		}
+		if role == "admin" {
+			adminToken = token
+		}
 		resp = get(token, "/api/support/sessions", workspaceID)
 		if resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("%s support status=%d", role, resp.StatusCode)
 		}
 		resp.Body.Close()
 	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings=jsonb_set(settings,'{support,approver_user_id}',to_jsonb($2::text),true) WHERE id=$1`, workspaceID, ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE support_case SET state='em_investigacao_tecnica' WHERE id=$1`, created["id"]); err != nil {
+		t.Fatal(err)
+	}
+	resp = get(tokenOne, "/api/support-admin/cases", workspaceID)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("reporter support-admin status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = get(ownerToken, "/api/support-admin/cases", workspaceID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner support-admin status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	var technicalIssueCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id=$1 AND origin_type='support_technical' AND origin_id=$2`, workspaceID, created["id"]).Scan(&technicalIssueCount); err != nil {
+		t.Fatalf("count technical issue: %v", err)
+	}
+	if technicalIssueCount != 1 {
+		t.Fatalf("technical escalation created %d issues, want 1", technicalIssueCount)
+	}
+	postAdmin := func(token, path, body string) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, testServer.URL+path+"?workspace_id="+workspaceID, bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatalf("create support admin request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		response, err := testServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("support admin request: %v", err)
+		}
+		return response
+	}
+	resp = postAdmin(ownerToken, "/api/support-admin/cases/"+created["id"]+"/request-approval", `{"summary":"Correção isolada com testes obrigatórios"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("request approval status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(adminToken, "/api/support-admin/cases/"+created["id"]+"/approve", "")
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-approver approval status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(ownerToken, "/api/support-admin/cases/"+created["id"]+"/approve", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("configured approver status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(ownerToken, "/api/support-admin/cases/"+created["id"]+"/technical-result", `{"status":"validated","summary":"Checks obrigatórios aprovados"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("technical result status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(adminToken, "/api/support-admin/cases/"+created["id"]+"/technical-result", `{"status":"published","summary":"Deploy verificado"}`)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("non-approver publication status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(ownerToken, "/api/support-admin/cases/"+created["id"]+"/technical-result", `{"status":"published","summary":"Deploy e smoke verificados"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("configured approver publication status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = get(ownerToken, "/api/support-admin/metrics", workspaceID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("support metrics status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
 	resp = get(tokenOne, "/api/support/sessions", workspaceID)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("list status=%d", resp.StatusCode)
@@ -211,6 +303,36 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if sentMessage.ID == "" || sentMessage.Role != "user" || sentMessage.Content != "Mais contexto" {
 		t.Fatalf("sent support message=%+v", sentMessage)
 	}
+	if _, err := testPool.Exec(ctx, `UPDATE support_case SET state='aguardando_confirmacao' WHERE id=$1`, created["id"]); err != nil {
+		t.Fatal(err)
+	}
+	postFeedback := func(token, action string) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/cases/"+created["id"]+"/"+action+"?workspace_id="+workspaceID, nil)
+		if err != nil {
+			t.Fatalf("create support feedback request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		response, err := testServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("support feedback request: %v", err)
+		}
+		return response
+	}
+	resp = postFeedback(tokenOne, "confirm-resolution")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirm resolution status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postFeedback(tokenTwo, "reopen")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-reporter reopen status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postFeedback(tokenOne, "reopen")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("owner reporter reopen status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
 	var enqueuedTasks int
 	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, created["session_id"]).Scan(&enqueuedTasks); err != nil {
 		t.Fatalf("count support tasks: %v", err)
@@ -276,10 +398,6 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("cross-workspace send message status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	tokenTwo, err := generateTestJWT(reporterTwo, "two@example.test", "Reporter Two")
-	if err != nil {
-		t.Fatalf("generate reporter two JWT: %v", err)
-	}
 	resp = get(tokenTwo, "/api/support/cases/"+created["id"], workspaceID)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-reporter status=%d", resp.StatusCode)

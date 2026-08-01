@@ -114,6 +114,7 @@ type NavKey =
   | "agents"
   | "squads"
   | "usage"
+  | "supportAdmin"
   | "runtimes"
   | "skills"
   | "settings";
@@ -130,6 +131,7 @@ type NavLabelKey =
   | "agents"
   | "squads"
   | "usage"
+  | "support_admin"
   | "runtimes"
   | "skills"
   | "settings";
@@ -150,6 +152,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "agents", labelKey: "agents" },
   { key: "squads", labelKey: "squads" },
   { key: "usage", labelKey: "usage" },
+  { key: "supportAdmin", labelKey: "support_admin" },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey }[] = [
@@ -735,7 +738,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
+                {workspaceNav
+                  .filter(
+                    (item) =>
+                      item.key !== "supportAdmin" ||
+                      workspace?.role === "owner" ||
+                      workspace?.role === "admin",
+                  )
+                  .map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = !isActivePinnedRoute && isNavActive(pathname, href);
@@ -751,7 +761,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
-                })}
+                  })}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

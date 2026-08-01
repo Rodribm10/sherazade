@@ -171,6 +171,9 @@ import type {
   CreateSupportSessionInput,
   SupportMessage,
   SupportSession,
+  SupportAdminCase,
+  SupportAdminDetail,
+  SupportMetrics,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
@@ -2038,13 +2041,81 @@ export class ApiClient {
     });
   }
 
-  async sendSupportMessage(sessionId: string, content: string): Promise<SupportMessage> {
+  async sendSupportMessage(sessionId: string, content: string, attachmentIds: string[] = []): Promise<SupportMessage> {
     const raw = await this.fetch<unknown>(`/api/support/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, attachment_ids: attachmentIds }),
     });
     return parseWithFallback(raw, SupportMessageSchema, EMPTY_SUPPORT_MESSAGE, {
       endpoint: "POST /api/support/sessions/:id/messages",
+    });
+  }
+
+  async uploadSupportAttachment(sessionId: string, file: File): Promise<Attachment> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await this.fetchRaw(`/api/support/sessions/${sessionId}/attachments`, {
+      method: "POST",
+      body: formData,
+    });
+    const raw = (await response.json()) as unknown;
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "POST /api/support/sessions/:id/attachments",
+    });
+  }
+
+  async confirmSupportResolution(caseId: string): Promise<SupportSession> {
+    const raw = await this.fetch<unknown>(
+      `/api/support/cases/${caseId}/confirm-resolution`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, SupportSessionSchema, EMPTY_SUPPORT_SESSION, {
+      endpoint: "POST /api/support/cases/:id/confirm-resolution",
+    });
+  }
+
+  async reopenSupportResolution(caseId: string): Promise<SupportSession> {
+    const raw = await this.fetch<unknown>(`/api/support/cases/${caseId}/reopen`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, SupportSessionSchema, EMPTY_SUPPORT_SESSION, {
+      endpoint: "POST /api/support/cases/:id/reopen",
+    });
+  }
+
+  async listSupportAdminCases(): Promise<SupportAdminCase[]> {
+    return this.fetch("/api/support-admin/cases");
+  }
+
+  async getSupportAdminCase(caseId: string): Promise<SupportAdminDetail> {
+    return this.fetch(`/api/support-admin/cases/${caseId}`);
+  }
+
+  async getSupportAdminMetrics(): Promise<SupportMetrics> {
+    return this.fetch("/api/support-admin/metrics");
+  }
+
+  async requestSupportApproval(caseId: string, summary: string): Promise<SupportAdminCase> {
+    return this.fetch(`/api/support-admin/cases/${caseId}/request-approval`, {
+      method: "POST",
+      body: JSON.stringify({ summary }),
+    });
+  }
+
+  async decideSupportExecution(caseId: string, approved: boolean): Promise<SupportAdminCase> {
+    return this.fetch(`/api/support-admin/cases/${caseId}/${approved ? "approve" : "reject"}`, {
+      method: "POST",
+    });
+  }
+
+  async completeSupportTechnicalWork(
+    caseId: string,
+    status: "validated" | "blocked" | "needs_rework" | "published",
+    summary: string,
+  ): Promise<SupportAdminCase> {
+    return this.fetch(`/api/support-admin/cases/${caseId}/technical-result`, {
+      method: "POST",
+      body: JSON.stringify({ status, summary }),
     });
   }
 

@@ -83,6 +83,10 @@ export type {
   SupportMessage,
   CreateSupportSessionInput,
   SendSupportMessageInput,
+  SupportAdminCase,
+  SupportAdminDetail,
+  SupportCaseTransition,
+  SupportMetrics,
 } from "./support";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";

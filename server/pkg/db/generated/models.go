@@ -974,6 +974,11 @@ type SupportCase struct {
 	IdempotencyKey        string             `json:"idempotency_key"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ApprovalRevision      int32              `json:"approval_revision"`
+	ApprovalSummary       pgtype.Text        `json:"approval_summary"`
+	ApprovalBy            pgtype.UUID        `json:"approval_by"`
+	ApprovalAt            pgtype.Timestamptz `json:"approval_at"`
+	RejectedAt            pgtype.Timestamptz `json:"rejected_at"`
 }
 
 type SupportCaseSequence struct {

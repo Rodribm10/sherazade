@@ -35,8 +35,8 @@ export function useSendSupportMessage(wsId: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ sessionId, content }: SendSupportMessageInput) =>
-      api.sendSupportMessage(sessionId, content),
+    mutationFn: ({ sessionId, content, attachmentIds }: SendSupportMessageInput) =>
+      api.sendSupportMessage(sessionId, content, attachmentIds),
     onSuccess: (message, { sessionId }) => {
       if (!message.id) return;
       queryClient.setQueryData<SupportMessage[]>(
@@ -51,6 +51,26 @@ export function useSendSupportMessage(wsId: string) {
       });
       queryClient.invalidateQueries({
         queryKey: supportKeys.sessions(wsId),
+      });
+    },
+  });
+}
+
+export function useSupportResolutionFeedback(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ caseId, resolved }: { caseId: string; resolved: boolean }) =>
+      resolved
+        ? api.confirmSupportResolution(caseId)
+        : api.reopenSupportResolution(caseId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<SupportSession[]>(
+        supportKeys.sessions(wsId),
+        (current = []) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      queryClient.invalidateQueries({
+        queryKey: supportKeys.messages(wsId, updated.session_id),
       });
     },
   });

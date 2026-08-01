@@ -154,7 +154,7 @@ func sameSupportUUID(left, right pgtype.UUID) bool {
 func supportResultState(outcome string) string {
 	switch outcome {
 	case "answer":
-		return "resposta_proposta"
+		return "aguardando_confirmacao"
 	case "ask_context":
 		return "aguardando_relator"
 	default:
@@ -405,6 +405,11 @@ func (h *Handler) completeSupportAnalysis(ctx context.Context, candidate db.Supp
 	if err := tx.Commit(ctx); err != nil {
 		return db.SupportCase{}, false, err
 	}
+
+	if result.Outcome == "escalate" {
+		completed = h.ensureSupportIssue(ctx, completed, true)
+	}
+	h.syncSupportIssueStatuses(ctx, completed)
 
 	h.publishChat(protocol.EventChatMessage, uuidToString(locked.WorkspaceID), "agent", uuidToString(conciergeID), uuidToString(locked.ChatSessionID), protocol.ChatMessagePayload{
 		ChatSessionID: uuidToString(locked.ChatSessionID),

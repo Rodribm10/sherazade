@@ -21,6 +21,7 @@ const supportPilotAppKey = "inaudit"
 type createSupportSessionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	Description    string `json:"description"`
+	DeferAnalysis  bool   `json:"defer_analysis,omitempty"`
 }
 
 type supportCaseResponse struct {
@@ -32,14 +33,18 @@ type supportCaseResponse struct {
 }
 
 type supportMessageRequest struct {
-	Content string `json:"content"`
+	Content       string   `json:"content"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 type supportSettings struct {
 	Support struct {
-		ConciergeAgentID string `json:"concierge_agent_id"`
-		KnowledgeContext string `json:"knowledge_context"`
-		Model            string `json:"model"`
+		ConciergeAgentID   string `json:"concierge_agent_id"`
+		KnowledgeContext   string `json:"knowledge_context"`
+		Model              string `json:"model"`
+		ProjectID          string `json:"project_id"`
+		TechnicalProjectID string `json:"technical_project_id"`
+		ApproverUserID     string `json:"approver_user_id"`
 	} `json:"support"`
 }
 
@@ -168,7 +173,10 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 	if existing, err := h.Queries.GetSupportCaseByIdempotency(r.Context(), db.GetSupportCaseByIdempotencyParams{
 		WorkspaceID: workspaceUUID, ReporterUserID: reporterUUID, IdempotencyKey: req.IdempotencyKey,
 	}); err == nil {
-		existing = h.maybeAnalyzeSupportCase(existing)
+		existing = h.ensureSupportIssue(r.Context(), existing, false)
+		if !req.DeferAnalysis {
+			existing = h.maybeAnalyzeSupportCase(existing)
+		}
 		writeJSON(w, http.StatusOK, supportCaseToResponse(existing))
 		return
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -198,7 +206,10 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to resolve support case retry")
 			return
 		}
-		existing = h.maybeAnalyzeSupportCase(existing)
+		existing = h.ensureSupportIssue(r.Context(), existing, false)
+		if !req.DeferAnalysis {
+			existing = h.maybeAnalyzeSupportCase(existing)
+		}
 		writeJSON(w, http.StatusOK, supportCaseToResponse(existing))
 		return
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -255,7 +266,10 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to load support case retry")
 				return
 			}
-			existing = h.maybeAnalyzeSupportCase(existing)
+			existing = h.ensureSupportIssue(r.Context(), existing, false)
+			if !req.DeferAnalysis {
+				existing = h.maybeAnalyzeSupportCase(existing)
+			}
 			writeJSON(w, http.StatusOK, supportCaseToResponse(existing))
 			return
 		}
@@ -272,7 +286,10 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit support session")
 		return
 	}
-	caseRow = h.maybeAnalyzeSupportCase(caseRow)
+	caseRow = h.ensureSupportIssue(r.Context(), caseRow, false)
+	if !req.DeferAnalysis {
+		caseRow = h.maybeAnalyzeSupportCase(caseRow)
+	}
 	writeJSON(w, http.StatusCreated, supportCaseToResponse(caseRow))
 }
 
@@ -312,6 +329,7 @@ func (h *Handler) GetSupportCase(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load support case")
 		return
 	}
+	caseRow = h.maybeAnalyzeSupportCase(caseRow)
 	writeJSON(w, http.StatusOK, supportCaseToResponse(caseRow))
 }
 
@@ -335,7 +353,112 @@ func (h *Handler) GetSupportSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load support session")
 		return
 	}
+	caseRow = h.maybeAnalyzeSupportCase(caseRow)
 	writeJSON(w, http.StatusOK, supportCaseToResponse(caseRow))
+}
+
+func (h *Handler) ConfirmSupportResolution(w http.ResponseWriter, r *http.Request) {
+	h.updateSupportResolutionByReporter(w, r, true)
+}
+
+func (h *Handler) ReopenSupportResolution(w http.ResponseWriter, r *http.Request) {
+	h.updateSupportResolutionByReporter(w, r, false)
+}
+
+func (h *Handler) updateSupportResolutionByReporter(w http.ResponseWriter, r *http.Request, resolved bool) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	caseID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "support case id")
+	if !ok {
+		return
+	}
+	workspaceID := parseUUID(ctxWorkspaceID(r.Context()))
+	reporterID := parseUUID(userID)
+	owned, err := h.Queries.GetSupportCaseForReporter(r.Context(), db.GetSupportCaseForReporterParams{
+		ID: caseID, WorkspaceID: workspaceID, ReporterUserID: reporterID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "support case not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load support case")
+		return
+	}
+
+	allowed := false
+	if resolved {
+		allowed = owned.State == "aguardando_confirmacao" || owned.State == "resposta_proposta"
+	} else {
+		allowed = owned.State == "aguardando_confirmacao" || owned.State == "resposta_proposta" || owned.State == "concluido"
+	}
+	if !allowed {
+		writeError(w, http.StatusConflict, "support case is not awaiting resolution feedback")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update support case")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	locked, err := qtx.LockSupportCase(r.Context(), db.LockSupportCaseParams{ID: caseID, WorkspaceID: workspaceID})
+	if err != nil || locked.ReporterUserID != reporterID {
+		writeError(w, http.StatusNotFound, "support case not found")
+		return
+	}
+	if resolved {
+		allowed = locked.State == "aguardando_confirmacao" || locked.State == "resposta_proposta"
+	} else {
+		allowed = locked.State == "aguardando_confirmacao" || locked.State == "resposta_proposta" || locked.State == "concluido"
+	}
+	if !allowed {
+		writeError(w, http.StatusConflict, "support case changed before feedback was recorded")
+		return
+	}
+
+	nextState := "aguardando_relator"
+	var updated db.SupportCase
+	if resolved {
+		nextState = "concluido"
+		updated, err = qtx.ConfirmSupportCaseResolution(r.Context(), db.ConfirmSupportCaseResolutionParams{ID: caseID, WorkspaceID: workspaceID})
+	} else {
+		updated, err = qtx.ReopenSupportCaseForReporter(r.Context(), db.ReopenSupportCaseForReporterParams{ID: caseID, WorkspaceID: workspaceID})
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update support case")
+		return
+	}
+	if _, err := qtx.CreateSupportCaseTransition(r.Context(), db.CreateSupportCaseTransitionParams{
+		SupportCaseID: caseID,
+		PreviousState: pgtype.Text{String: locked.State, Valid: true},
+		NewState:      nextState,
+		ActorType:     "member",
+		ActorID:       reporterID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to audit support feedback")
+		return
+	}
+	if !resolved {
+		if _, err := qtx.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+			ChatSessionID: locked.ChatSessionID,
+			Role:          "assistant",
+			Content:       "Entendi. Conte o que ainda não resolveu ou envie outro print; o caso foi reaberto.",
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reopen support conversation")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit support feedback")
+		return
+	}
+	h.syncSupportIssueStatuses(r.Context(), updated)
+	writeJSON(w, http.StatusOK, supportCaseToResponse(updated))
 }
 
 func (h *Handler) supportSessionForReporter(w http.ResponseWriter, r *http.Request) (db.SupportCase, bool) {
@@ -369,9 +492,14 @@ func (h *Handler) ListSupportMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list support messages")
 		return
 	}
+	messageIDs := make([]pgtype.UUID, 0, len(messages))
+	for _, message := range messages {
+		messageIDs = append(messageIDs, message.ID)
+	}
+	attachments := h.groupChatMessageAttachments(r.Context(), uuidToString(caseRow.WorkspaceID), messageIDs)
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, message := range messages {
-		resp[i] = chatMessageToResponse(message, nil)
+		resp[i] = chatMessageToResponse(message, attachments[uuidToString(message.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -394,8 +522,20 @@ func (h *Handler) SendSupportMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Content = strings.TrimSpace(req.Content)
-	if req.Content == "" || len(req.Content) > 8*1024 {
-		writeError(w, http.StatusBadRequest, "content must be between 1 and 8192 characters")
+	if len(req.Content) > 8*1024 {
+		writeError(w, http.StatusBadRequest, "content must not exceed 8192 characters")
+		return
+	}
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+	if len(attachmentIDs) > 5 {
+		writeError(w, http.StatusBadRequest, "attachment_ids must not contain more than 5 files")
+		return
+	}
+	if req.Content == "" && len(attachmentIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "content or attachment_ids is required")
 		return
 	}
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -414,10 +554,32 @@ func (h *Handler) SendSupportMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock support session")
 		return
 	}
-	message, err := qtx.CreateChatMessage(r.Context(), db.CreateChatMessageParams{ChatSessionID: locked.ChatSessionID, Role: "user", Content: req.Content})
+	messageContent := req.Content
+	if messageContent == "" {
+		messageContent = "Enviei um anexo para complementar o atendimento."
+	}
+	message, err := qtx.CreateChatMessage(r.Context(), db.CreateChatMessageParams{ChatSessionID: locked.ChatSessionID, Role: "user", Content: messageContent})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create support message")
 		return
+	}
+	if len(attachmentIDs) > 0 {
+		linked, err := qtx.LinkAttachmentsToChatMessage(r.Context(), db.LinkAttachmentsToChatMessageParams{
+			ChatMessageID: message.ID,
+			ChatSessionID: locked.ChatSessionID,
+			WorkspaceID:   locked.WorkspaceID,
+			UploaderType:  "member",
+			UploaderID:    locked.ReporterUserID,
+			AttachmentIds: attachmentIDs,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to link support attachments")
+			return
+		}
+		if len(linked) != len(attachmentIDs) {
+			writeError(w, http.StatusBadRequest, "one or more attachments do not belong to this support session")
+			return
+		}
 	}
 	updated, err := qtx.MarkSupportCasePending(r.Context(), db.MarkSupportCasePendingParams{
 		PendingMessageID: message.ID,
@@ -447,5 +609,10 @@ func (h *Handler) SendSupportMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.maybeAnalyzeSupportCase(updated)
-	writeJSON(w, http.StatusCreated, chatMessageToResponse(message, nil))
+	var responseAttachments []AttachmentResponse
+	if len(attachmentIDs) > 0 {
+		grouped := h.groupChatMessageAttachments(r.Context(), uuidToString(locked.WorkspaceID), []pgtype.UUID{message.ID})
+		responseAttachments = grouped[uuidToString(message.ID)]
+	}
+	writeJSON(w, http.StatusCreated, chatMessageToResponse(message, responseAttachments))
 }

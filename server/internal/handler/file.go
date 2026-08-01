@@ -751,9 +751,23 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		return db.Attachment{}, false
 	}
 	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil || member.Role == "reporter" {
+	if err != nil {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
+	}
+	if member.Role == "reporter" {
+		if !att.ChatSessionID.Valid {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return db.Attachment{}, false
+		}
+		if _, err := h.Queries.GetSupportCaseBySessionForReporter(r.Context(), db.GetSupportCaseBySessionForReporterParams{
+			ChatSessionID:  att.ChatSessionID,
+			WorkspaceID:    att.WorkspaceID,
+			ReporterUserID: parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return db.Attachment{}, false
+		}
 	}
 	return att, true
 }

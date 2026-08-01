@@ -81,6 +81,13 @@ export const SupportMessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
   created_at: z.string(),
+	attachments: z.array(z.object({
+		id: z.string(),
+		url: z.string(),
+		download_url: z.string(),
+		markdown_url: z.string().optional().default(""),
+		filename: z.string(),
+	}).loose()).optional(),
 }).loose();
 
 export const SupportMessagesSchema = z.array(SupportMessageSchema);

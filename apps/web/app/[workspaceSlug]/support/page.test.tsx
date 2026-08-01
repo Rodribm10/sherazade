@@ -138,6 +138,7 @@ describe("SupportPage", () => {
       expect(apiStub.sendSupportMessage).toHaveBeenCalledWith(
         "session-1",
         "Informação adicional",
+        [],
       ),
     );
     expect(await screen.findByText("Informação adicional")).toBeInTheDocument();

@@ -685,6 +685,54 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 	return i, err
 }
 
+const getIssueBySupportOrigin = `-- name: GetIssueBySupportOrigin :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties FROM issue
+WHERE workspace_id = $1
+  AND origin_type = $2
+  AND origin_id = $3
+LIMIT 1
+`
+
+type GetIssueBySupportOriginParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OriginType  pgtype.Text `json:"origin_type"`
+	OriginID    pgtype.UUID `json:"origin_id"`
+}
+
+func (q *Queries) GetIssueBySupportOrigin(ctx context.Context, arg GetIssueBySupportOriginParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueBySupportOrigin, arg.WorkspaceID, arg.OriginType, arg.OriginID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+	)
+	return i, err
+}
+
 const getIssueGCStatus = `-- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue

@@ -1,14 +1,16 @@
 "use client";
 
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   supportMessagesOptions,
   supportSessionsOptions,
   useCreateSupportSession,
   useSendSupportMessage,
+  useSupportResolutionFeedback,
 } from "@multica/core/support";
 
 const supportStateLabel: Record<string, string> = {
@@ -31,6 +33,7 @@ export default function SupportPage() {
   );
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
+	const [files, setFiles] = useState<File[]>([]);
   const [idempotencyKey, setIdempotencyKey] = useState(() =>
     crypto.randomUUID(),
   );
@@ -46,7 +49,11 @@ export default function SupportPage() {
   const messages = messagesQuery.data ?? [];
   const createSession = useCreateSupportSession(workspaceId);
   const sendMessage = useSendSupportMessage(workspaceId);
-  const submitting = createSession.isPending || sendMessage.isPending;
+  const resolutionFeedback = useSupportResolutionFeedback(workspaceId);
+  const submitting =
+    createSession.isPending ||
+    sendMessage.isPending ||
+    resolutionFeedback.isPending;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -55,24 +62,42 @@ export default function SupportPage() {
 
     setError(null);
     try {
+		let targetSessionId = selectedSession?.session_id ?? "";
       if (selectedSession) {
+		const attachments = await Promise.all(
+			files.map((file) => api.uploadSupportAttachment(targetSessionId, file)),
+		);
         const sent = await sendMessage.mutateAsync({
-          sessionId: selectedSession.session_id,
+			sessionId: targetSessionId,
           content,
+			attachmentIds: attachments.map((attachment) => attachment.id),
         });
         if (!sent.id) throw new Error("invalid support message response");
       } else {
         const created = await createSession.mutateAsync({
           idempotency_key: idempotencyKey,
           description: content,
+			defer_analysis: files.length > 0,
         });
         if (!created.id || !created.session_id) {
           throw new Error("invalid support session response");
         }
         setSelectedSessionId(created.session_id);
+		targetSessionId = created.session_id;
+		if (files.length > 0) {
+			const attachments = await Promise.all(
+				files.map((file) => api.uploadSupportAttachment(targetSessionId, file)),
+			);
+			await sendMessage.mutateAsync({
+				sessionId: targetSessionId,
+				content: "Enviei estes anexos para complementar a descrição.",
+				attachmentIds: attachments.map((attachment) => attachment.id),
+			});
+		}
         setIdempotencyKey(crypto.randomUUID());
       }
       setDescription("");
+		setFiles([]);
     } catch {
       setError("Não foi possível enviar agora. Tente novamente.");
     }
@@ -82,7 +107,14 @@ export default function SupportPage() {
     setSelectedSessionId(null);
     setDescription("");
     setError(null);
+	setFiles([]);
   }
+
+	function chooseFiles(event: ChangeEvent<HTMLInputElement>) {
+		const next = Array.from(event.target.files ?? []).slice(0, 5);
+		setFiles(next);
+		event.target.value = "";
+	}
 
   const loadError = sessionsQuery.isError
     ? "Não foi possível carregar seus atendimentos."
@@ -197,10 +229,55 @@ export default function SupportPage() {
                 <p className="whitespace-pre-wrap break-words">
                   {message.content}
                 </p>
+				{message.attachments && message.attachments.length > 0 && (
+					<ul className="mt-3 space-y-2">
+						{message.attachments.map((attachment) => (
+							<li key={attachment.id}>
+								<a className="underline" href={attachment.download_url} target="_blank" rel="noreferrer">
+									{attachment.filename}
+								</a>
+							</li>
+						))}
+					</ul>
+				)}
               </article>
             ))
           )}
         </div>
+
+        {selectedSession &&
+          ["resposta_proposta", "aguardando_confirmacao"].includes(
+            selectedSession.state,
+          ) && (
+            <div className="flex flex-wrap gap-3 border-t pt-4">
+              <button
+                type="button"
+                disabled={resolutionFeedback.isPending}
+                onClick={() =>
+                  resolutionFeedback.mutate({
+                    caseId: selectedSession.id,
+                    resolved: true,
+                  })
+                }
+                className="rounded-md bg-primary px-4 py-2 text-body font-medium text-primary-foreground disabled:opacity-50"
+              >
+                Resolveu
+              </button>
+              <button
+                type="button"
+                disabled={resolutionFeedback.isPending}
+                onClick={() =>
+                  resolutionFeedback.mutate({
+                    caseId: selectedSession.id,
+                    resolved: false,
+                  })
+                }
+                className="rounded-md border px-4 py-2 text-body font-medium disabled:opacity-50"
+              >
+                Ainda não resolveu
+              </button>
+            </div>
+          )}
 
         <form onSubmit={submit} className="grid gap-3 border-t pt-4">
           <label htmlFor="description" className="text-body font-medium">
@@ -218,6 +295,15 @@ export default function SupportPage() {
             placeholder="Explique o que aconteceu, em qual tela e o que você esperava ver."
             className="w-full resize-y rounded-md border bg-background p-3 text-body outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
+		  <div className="flex flex-wrap items-center gap-3">
+			<label className="cursor-pointer rounded-md border px-3 py-2 text-body">
+				Adicionar print ou PDF
+				<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,application/pdf" multiple onChange={chooseFiles} />
+			</label>
+			{files.length > 0 && (
+				<span className="text-caption text-muted-foreground">{files.length} arquivo(s) selecionado(s)</span>
+			)}
+		  </div>
           <button
             type="submit"
             disabled={submitting || description.trim().length === 0}

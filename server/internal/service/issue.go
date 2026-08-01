@@ -469,6 +469,10 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 		return analytics.SourceManual, originID, ""
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID
+	case "support_case", "support_technical":
+		// Support issues are human-facing operational records created by the
+		// server workflow, not agent tasks or autopilot runs.
+		return analytics.SourceManual, "", ""
 	default:
 		slog.Warn("analytics: unknown issue origin type",
 			"origin_type", issue.OriginType.String,

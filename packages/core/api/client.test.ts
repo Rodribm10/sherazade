@@ -75,6 +75,26 @@ describe("ApiClient support response schemas", () => {
       content: "",
     });
   });
+
+  it("uploads a support attachment as multipart without forcing JSON content type", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      id: "attachment-1",
+      url: "/uploads/attachment-1.png",
+      download_url: "/api/attachments/attachment-1/download",
+      filename: "print.png",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.uploadSupportAttachment(
+      "session-1",
+      new File([new Uint8Array([137, 80, 78, 71])], "print.png", {
+        type: "image/png",
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+  });
 });
 
 describe("ApiClient pull-request response schema", () => {

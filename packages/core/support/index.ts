@@ -3,4 +3,8 @@ export {
   supportMessagesOptions,
   supportSessionsOptions,
 } from "./queries";
-export { useCreateSupportSession, useSendSupportMessage } from "./mutations";
+export {
+  useCreateSupportSession,
+  useSendSupportMessage,
+  useSupportResolutionFeedback,
+} from "./mutations";

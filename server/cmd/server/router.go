@@ -1086,7 +1086,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/sessions/{id}", h.GetSupportSession)
 				r.Get("/sessions/{id}/messages", h.ListSupportMessages)
 				r.Post("/sessions/{id}/messages", h.SendSupportMessage)
+				r.Post("/sessions/{id}/attachments", h.UploadSupportAttachment)
 				r.Get("/cases/{id}", h.GetSupportCase)
+				r.Post("/cases/{id}/confirm-resolution", h.ConfirmSupportResolution)
+				r.Post("/cases/{id}/reopen", h.ReopenSupportResolution)
 			})
 		})
 
@@ -1130,6 +1133,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// --- Workspace-scoped routes (all require workspace membership) ---
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin", "member"))
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				r.Route("/api/support-admin", func(r chi.Router) {
+					r.Get("/cases", h.ListSupportCasesAdmin)
+					r.Get("/cases/{id}", h.GetSupportCaseAdmin)
+					r.Get("/metrics", h.GetSupportMetricsAdmin)
+					r.Post("/cases/{id}/request-approval", h.RequestSupportApproval)
+					r.Post("/cases/{id}/approve", h.ApproveSupportExecution)
+					r.Post("/cases/{id}/reject", h.RejectSupportExecution)
+					r.Post("/cases/{id}/technical-result", h.CompleteSupportTechnicalWork)
+				})
+			})
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
