@@ -303,6 +303,17 @@ WHERE agent_id IN (SELECT id FROM agent WHERE agent.workspace_id = $1)
    OR issue_id IN (SELECT id FROM issue WHERE issue.workspace_id = $1)
    OR runtime_id IN (SELECT id FROM agent_runtime WHERE agent_runtime.workspace_id = $1);
 
+-- name: DeleteWorkspaceSupportData :exec
+WITH cases AS MATERIALIZED (
+    SELECT support_case.id FROM support_case WHERE support_case.workspace_id = $1
+), deleted_transitions AS (
+    DELETE FROM support_case_transition
+    WHERE support_case_transition.support_case_id IN (SELECT cases.id FROM cases)
+), deleted_cases AS (
+    DELETE FROM support_case WHERE support_case.id IN (SELECT cases.id FROM cases)
+)
+DELETE FROM support_case_sequence WHERE support_case_sequence.workspace_id = $1;
+
 -- name: DeleteWorkspaceChatMessages :exec
 DELETE FROM chat_message
 WHERE chat_session_id IN (

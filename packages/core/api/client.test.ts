@@ -5,6 +5,98 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient support response schemas", () => {
+  const response = (body: unknown) => new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+
+  it("parses support sessions, messages, and the reporter workspace role", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        id: "case-1",
+        public_code: "SUP-000001",
+        session_id: "session-1",
+        app_key: "inaudit",
+        state: "novo",
+      }))
+      .mockResolvedValueOnce(response([{
+        id: "message-1",
+        role: "user",
+        content: "Minha pontuação não apareceu",
+        created_at: "2026-08-01T18:00:00Z",
+      }]))
+      .mockResolvedValueOnce(response([{
+        id: "workspace-1",
+        name: "Innova",
+        slug: "innova",
+        description: null,
+        context: null,
+        settings: {},
+        repos: [],
+        issue_prefix: "INA",
+        avatar_url: null,
+        created_at: "2026-08-01T18:00:00Z",
+        updated_at: "2026-08-01T18:00:00Z",
+        role: "reporter",
+      }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createSupportSession({
+      idempotency_key: "support-key-1",
+      description: "Minha pontuação não apareceu",
+    })).resolves.toMatchObject({ public_code: "SUP-000001", app_key: "inaudit" });
+    await expect(client.listSupportMessages("session-1")).resolves.toEqual([
+      expect.objectContaining({ id: "message-1", role: "user" }),
+    ]);
+    await expect(client.listWorkspaces()).resolves.toEqual([
+      expect.objectContaining({ id: "workspace-1", role: "reporter" }),
+    ]);
+  });
+
+  it("falls back safely when support success bodies are malformed", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ state: "novo" }))
+      .mockResolvedValueOnce(response({ sessions: "broken" }))
+      .mockResolvedValueOnce(response([{ id: "message-1", role: "system" }]))
+      .mockResolvedValueOnce(response({ id: "message-2", content: 42 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createSupportSession({
+      idempotency_key: "support-key-1",
+      description: "Ajuda",
+    })).resolves.toMatchObject({ id: "", session_id: "" });
+    await expect(client.listSupportSessions()).resolves.toEqual([]);
+    await expect(client.listSupportMessages("session-1")).resolves.toEqual([]);
+    await expect(client.sendSupportMessage("session-1", "Outra mensagem")).resolves.toMatchObject({
+      id: "",
+      content: "",
+    });
+  });
+
+  it("uploads a support attachment as multipart without forcing JSON content type", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      id: "attachment-1",
+      url: "/uploads/attachment-1.png",
+      download_url: "/api/attachments/attachment-1/download",
+      filename: "print.png",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await client.uploadSupportAttachment(
+      "session-1",
+      new File([new Uint8Array([137, 80, 78, 71])], "print.png", {
+        type: "image/png",
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined();
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",

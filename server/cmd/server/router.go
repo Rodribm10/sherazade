@@ -228,6 +228,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		SupportEvidenceURL:       strings.TrimSpace(os.Getenv("MULTICA_SUPPORT_EVIDENCE_URL")),
+		SupportEvidenceToken:     strings.TrimSpace(os.Getenv("MULTICA_SUPPORT_EVIDENCE_TOKEN")),
+		SupportEvidenceTimeout:   envDuration("MULTICA_SUPPORT_EVIDENCE_TIMEOUT", 8*time.Second),
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
@@ -935,7 +938,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/{id}", func(r chi.Router) {
 				// Member-level access
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
@@ -1005,7 +1008,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				//     run canManageAgent (status gates on the session
 				//     initiator or an admin) before doing anything.
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
@@ -1023,7 +1026,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// hit by Slack's browser redirect with no workspace in the path)
 				// and is registered outside this workspace group.
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
 				})
 				r.Group(func(r chi.Router) {
@@ -1073,6 +1076,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
+		// Support is an explicit reporter-only allowlist. It stays outside the
+		// generic workspace group, which intentionally excludes reporters.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRole(queries, "reporter"))
+			r.Route("/api/support", func(r chi.Router) {
+				r.Post("/sessions", h.CreateSupportSession)
+				r.Get("/sessions", h.ListSupportSessions)
+				r.Get("/sessions/{id}", h.GetSupportSession)
+				r.Get("/sessions/{id}/messages", h.ListSupportMessages)
+				r.Post("/sessions/{id}/messages", h.SendSupportMessage)
+				r.Post("/sessions/{id}/attachments", h.UploadSupportAttachment)
+				r.Get("/cases/{id}", h.GetSupportCase)
+				r.Post("/cases/{id}/confirm-resolution", h.ConfirmSupportResolution)
+				r.Post("/cases/{id}/reopen", h.ReopenSupportResolution)
+			})
+		})
+
 		// Cloud Billing proxy. Same upstream service / port as
 		// cloud-runtime — multica-cloud's Fleet and Billing share
 		// :8080 and the same chi router. All routes here forward
@@ -1112,7 +1132,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireWorkspaceMember(queries))
+			r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin", "member"))
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin"))
+				r.Route("/api/support-admin", func(r chi.Router) {
+					r.Get("/cases", h.ListSupportCasesAdmin)
+					r.Get("/cases/{id}", h.GetSupportCaseAdmin)
+					r.Get("/metrics", h.GetSupportMetricsAdmin)
+					r.Post("/cases/{id}/request-approval", h.RequestSupportApproval)
+					r.Post("/cases/{id}/approve", h.ApproveSupportExecution)
+					r.Post("/cases/{id}/reject", h.RejectSupportExecution)
+					r.Post("/cases/{id}/technical-result", h.CompleteSupportTechnicalWork)
+				})
+			})
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
@@ -1585,11 +1618,11 @@ type membershipChecker struct {
 }
 
 func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID string) bool {
-	_, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	member, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      parseUUID(userID),
 		WorkspaceID: parseUUID(workspaceID),
 	})
-	return err == nil
+	return err == nil && member.Role != "reporter"
 }
 
 // patResolver implements realtime.PATResolver using database queries.

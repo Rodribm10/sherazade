@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS support_case_transition_id_unique;

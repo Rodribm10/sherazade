@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY support_case_sequence_workspace_unique ON support_case_sequence (workspace_id);

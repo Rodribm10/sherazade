@@ -625,6 +625,13 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session draft restores")
 		return
 	}
+	// Support cases deliberately carry no database foreign keys. Remove the
+	// case and its transition history inside the same session-delete transaction
+	// so a direct API caller cannot strand support data behind a deleted chat.
+	if err := qtx.DeleteSupportCaseDataByChatSession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session support case")
+		return
+	}
 
 	if err := qtx.DeleteChatSession(r.Context(), db.DeleteChatSessionParams{
 		ID:          session.ID,

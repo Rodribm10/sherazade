@@ -46,6 +46,34 @@ type WorkspaceResponse struct {
 	AvatarURL   *string `json:"avatar_url"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	Role        string  `json:"role,omitempty"`
+}
+
+func (h *Handler) workspaceListToResponse(w db.ListWorkspacesRow) WorkspaceResponse {
+	var settings any
+	_ = json.Unmarshal(w.Settings, &settings)
+	if settings == nil {
+		settings = map[string]any{}
+	}
+	var repos any
+	_ = json.Unmarshal(w.Repos, &repos)
+	if repos == nil {
+		repos = []any{}
+	}
+	return WorkspaceResponse{
+		ID:          uuidToString(w.ID),
+		Name:        w.Name,
+		Slug:        w.Slug,
+		Description: textToPtr(w.Description),
+		Context:     textToPtr(w.Context),
+		Settings:    settings,
+		Repos:       repos,
+		IssuePrefix: w.IssuePrefix,
+		AvatarURL:   h.resolveAvatarURLPtr(textToPtr(w.AvatarUrl)),
+		CreatedAt:   timestampToString(w.CreatedAt),
+		UpdatedAt:   timestampToString(w.UpdatedAt),
+		Role:        w.Role,
+	}
 }
 
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -110,7 +138,7 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]WorkspaceResponse, len(workspaces))
 	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(ws)
+		resp[i] = h.workspaceListToResponse(ws)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -465,7 +493,7 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "owner", "admin", "member", "reporter":
 		return role, true
 	default:
 		return "", false
@@ -832,6 +860,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete tasks",
 			run:  func() error { return qtx.DeleteWorkspaceTasks(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete support data",
+			run:  func() error { return qtx.DeleteWorkspaceSupportData(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete chat messages",

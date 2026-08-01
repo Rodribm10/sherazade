@@ -121,6 +121,12 @@ type Config struct {
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
+	// SupportEvidence* configure the optional read-only investigation broker
+	// used by the support Concierge. The broker owns application-specific code
+	// and data connectors; Multica only receives bounded, attributed evidence.
+	SupportEvidenceURL     string
+	SupportEvidenceToken   string
+	SupportEvidenceTimeout time.Duration
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -266,6 +272,10 @@ type Handler struct {
 	// Config); when unconfigured its Enabled() reports false and callers fall
 	// back silently.
 	LLM *llm.Client
+	// SupportEvidence is intentionally separate from agent runtimes and has no
+	// mutation API. Nil means the Concierge must rely on configured knowledge
+	// and conversation context, escalating questions that need live evidence.
+	SupportEvidence supportEvidenceProvider
 	// VCSSecretBox encrypts/decrypts per-workspace Git provider access tokens and
 	// webhook secrets at rest (Forgejo / Gitea / GitLab). Nil when
 	// MULTICA_VCS_SECRET_KEY is unset; the connect/webhook handlers return 503
@@ -318,6 +328,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		BaseURL:      cfg.LLMBaseURL,
 		DefaultModel: cfg.LLMDefaultModel,
 	})
+	supportEvidence, err := newHTTPSupportEvidenceClient(cfg.SupportEvidenceURL, cfg.SupportEvidenceToken, cfg.SupportEvidenceTimeout)
+	if err != nil {
+		slog.Warn("support evidence: provider disabled due to invalid configuration", "error", err)
+	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
@@ -355,8 +369,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,
 		}),
-		LLM: llmClient,
-		cfg: cfg,
+		LLM:             llmClient,
+		SupportEvidence: supportEvidence,
+		cfg:             cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 

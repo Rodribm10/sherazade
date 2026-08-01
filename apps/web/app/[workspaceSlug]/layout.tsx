@@ -11,6 +11,7 @@ import { NoAccessPage } from "@multica/views/workspace/no-access-page";
 import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
+import { ReporterRouteGate } from "@/platform/reporter-route-gate";
 
 export default function WorkspaceLayout({
   children,
@@ -98,12 +99,18 @@ export default function WorkspaceLayout({
 
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
-      {children}
-      {/* Reads the welcome-store transient signal parked by
-       *  OnboardingFlow.handleRuntimeNext. Runtime path → loading veil →
-       *  blocking Modal with Helper + starter cards. Skip path → Modal
-       *  with two seeded issues. No signal → null. */}
-      <WelcomeAfterOnboarding />
+      <ReporterRouteGate
+        role={workspace.role}
+        workspaceSlug={workspaceSlug}
+        loadingIndicator={loadingIndicator}
+      >
+        {children}
+        {/* Reads the welcome-store transient signal parked by
+         *  OnboardingFlow.handleRuntimeNext. Runtime path → loading veil →
+         *  blocking Modal with Helper + starter cards. Skip path → Modal
+         *  with two seeded issues. No signal → null. */}
+        <WelcomeAfterOnboarding />
+      </ReporterRouteGate>
     </WorkspaceSlugProvider>
   );
 }

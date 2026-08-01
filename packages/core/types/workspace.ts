@@ -1,4 +1,4 @@
-export type MemberRole = "owner" | "admin" | "member";
+export type MemberRole = "owner" | "admin" | "member" | "reporter";
 
 export interface WorkspaceRepo {
   url: string;
@@ -17,6 +17,7 @@ export interface Workspace {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  role?: MemberRole;
 }
 
 export interface Member {

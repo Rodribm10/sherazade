@@ -50,9 +50,79 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  Workspace,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+import type { SupportMessage, SupportSession } from "../types/support";
+
+export const SupportSessionSchema = z.object({
+  id: z.string(),
+  public_code: z.string(),
+  session_id: z.string(),
+  app_key: z.string(),
+  state: z.string(),
+}).loose();
+
+export const SupportSessionsSchema = z.array(SupportSessionSchema);
+
+export const EMPTY_SUPPORT_SESSION: SupportSession = {
+  id: "",
+  public_code: "",
+  session_id: "",
+  app_key: "",
+  state: "",
+};
+
+export const EMPTY_SUPPORT_SESSIONS: SupportSession[] = [];
+
+export const SupportMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  created_at: z.string(),
+	attachments: z.array(z.object({
+		id: z.string(),
+		url: z.string(),
+		download_url: z.string(),
+		markdown_url: z.string().optional().default(""),
+		filename: z.string(),
+	}).loose()).optional(),
+}).loose();
+
+export const SupportMessagesSchema = z.array(SupportMessageSchema);
+
+export const EMPTY_SUPPORT_MESSAGE: SupportMessage = {
+  id: "",
+  role: "assistant",
+  content: "",
+  created_at: "",
+};
+
+export const EMPTY_SUPPORT_MESSAGES: SupportMessage[] = [];
+
+const WorkspaceListRepoSchema = z.object({
+  url: z.string(),
+  description: z.string().optional(),
+}).loose();
+
+export const WorkspaceListItemSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().nullable(),
+  context: z.string().nullable(),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  repos: z.array(WorkspaceListRepoSchema).default([]),
+  issue_prefix: z.string(),
+  avatar_url: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  role: z.enum(["owner", "admin", "member", "reporter"]).optional(),
+}).loose();
+
+export const WorkspaceListSchema = z.array(WorkspaceListItemSchema);
+export const EMPTY_WORKSPACE_LIST: Workspace[] = [];
 
 export const GitHubInstallationSchema = z.object({
   id: z.string(),

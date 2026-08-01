@@ -16,8 +16,8 @@ type DaemonWorkspaceResponse struct {
 }
 
 // ListDaemonWorkspaces returns the minimal workspace membership projection
-// needed by local daemons. User-scoped PAT/JWT callers receive every workspace
-// they belong to; workspace-scoped daemon tokens receive only their bound
+// needed by local daemons. User-scoped PAT/JWT callers receive only workspaces
+// where they hold an operational role (owner, admin, or member); workspace-scoped daemon tokens receive only their bound
 // workspace.
 func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 	var resp []DaemonWorkspaceResponse

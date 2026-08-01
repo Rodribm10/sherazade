@@ -22,6 +22,9 @@ import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
 const isAdminLike = (role: MemberRole | null) =>
   role === "owner" || role === "admin";
 
+const reporterDenied = () =>
+  deny("not_member", "This workspace role cannot access this feature.");
+
 // ---- Agents ----------------------------------------------------------------
 
 /**
@@ -33,6 +36,7 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
   if (isAdminLike(ctx.role)) return ALLOW;
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
@@ -61,6 +65,7 @@ export function canAssignAgentToIssue(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to assign agents.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
 
   // The owner may always invoke their own agent, regardless of mode.
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) {
@@ -108,6 +113,7 @@ export function canEditSkill(skill: Skill, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this skill.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
   if (isAdminLike(ctx.role)) return ALLOW;
   if (skill.created_by !== null && skill.created_by === ctx.userId) {
     return ALLOW;
@@ -131,6 +137,7 @@ export function canEditComment(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit comments.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
   // Only member-authored comments can be edited; agent-authored comments are
   // immutable from any human's perspective.
   if (comment.author_type !== "member") {
@@ -154,6 +161,7 @@ export function canDeleteComment(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to delete comments.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
   if (comment.author_type === "member" && comment.author_id === ctx.userId) {
     return ALLOW;
   }
@@ -173,6 +181,7 @@ export function canDeleteRuntime(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to delete runtimes.");
   }
+  if (ctx.role === "reporter") return reporterDenied();
   if (isAdminLike(ctx.role)) return ALLOW;
   if (runtime.owner_id !== null && runtime.owner_id === ctx.userId) {
     return ALLOW;
