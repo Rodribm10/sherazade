@@ -85,3 +85,29 @@ Questions about scores, payroll, finance, or permissions may be explained only
 when deterministic rule and live-data evidence agree. Missing or conflicting
 evidence produces a context request or technical escalation; it never grants
 the Concierge permission to change the application.
+
+## First InAudit adapter
+
+The candidate adapter lives in the InAudit repository as the Supabase Edge
+Function `support-evidence-broker`. It currently supports one deliberately
+narrow tool: explaining the reporter's own Black Belt score for
+`conferencia_quartos`.
+
+The adapter resolves the immutable Multica login email to one active InAudit
+profile, lists only that profile's allowed units, requires an unambiguous unit,
+and returns a sanitized deterministic explanation. Operational notes, evidence
+URLs, audit IDs, snapshot IDs, and arbitrary subject IDs never cross the
+boundary.
+
+After the InAudit security gate and controlled deployment are complete, point
+Multica to:
+
+```dotenv
+MULTICA_SUPPORT_EVIDENCE_URL=https://acdvblhzzaneddlxqyst.supabase.co/functions/v1/support-evidence-broker
+MULTICA_SUPPORT_EVIDENCE_TOKEN=<same dedicated token stored in the InAudit function>
+```
+
+Do not enable this configuration yet. The live InAudit database currently has
+pre-existing Black Belt table and RPC privilege findings that must be remediated
+and regression-tested before the broker is activated. Until then the Concierge
+continues to use versioned knowledge and reports live evidence as unavailable.
