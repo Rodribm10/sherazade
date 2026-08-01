@@ -862,6 +862,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceTasks(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete support data",
+			run:  func() error { return qtx.DeleteWorkspaceSupportData(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete chat messages",
 			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
 		},

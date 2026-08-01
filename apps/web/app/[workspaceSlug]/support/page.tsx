@@ -16,9 +16,11 @@ const supportStateLabel: Record<string, string> = {
   coletando_contexto: "Coletando informações",
   aguardando_relator: "Aguardando sua resposta",
   em_analise: "Em análise",
-  resposta_proposta: "Resposta disponível",
+  resposta_proposta: "Resposta do Concierge disponível",
   aguardando_confirmacao: "Aguardando sua confirmação",
   concluido: "Concluído",
+  em_investigacao_tecnica: "Encaminhado para investigação técnica",
+  aguardando_aprovacao: "Aguardando aprovação do Rodrigo",
   bloqueado: "Bloqueado",
 };
 
@@ -93,7 +95,8 @@ export default function SupportPage() {
       <aside className="rounded-xl border bg-card p-4 text-card-foreground">
         <h1 className="text-title-lg font-semibold">Suporte dos Sistemas Innova</h1>
         <p className="mt-2 text-body text-muted-foreground">
-          Seus atendimentos ficam separados e só você pode acessá-los.
+          O Concierge responde dúvidas e coleta o contexto. Mudanças técnicas
+          só avançam com aprovação.
         </p>
         <button
           type="button"
@@ -220,7 +223,7 @@ export default function SupportPage() {
             disabled={submitting || description.trim().length === 0}
             className="justify-self-end rounded-md bg-primary px-5 py-2 text-body font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? "Enviando…" : "Enviar para suporte"}
+            {submitting ? "Concierge analisando…" : "Enviar para o Concierge"}
           </button>
         </form>
       </section>

@@ -46,6 +46,12 @@ export function useSendSupportMessage(wsId: string) {
           return [...current, message];
         },
       );
+      queryClient.invalidateQueries({
+        queryKey: supportKeys.messages(wsId, sessionId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: supportKeys.sessions(wsId),
+      });
     },
   });
 }

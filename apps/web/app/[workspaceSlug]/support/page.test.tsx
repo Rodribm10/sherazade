@@ -67,7 +67,7 @@ describe("SupportPage", () => {
       "Minha pontuação não apareceu",
     );
     await user.click(
-      screen.getByRole("button", { name: "Enviar para suporte" }),
+      screen.getByRole("button", { name: "Enviar para o Concierge" }),
     );
 
     await waitFor(() =>
@@ -92,14 +92,29 @@ describe("SupportPage", () => {
         state: "novo",
       },
     ]);
-    apiStub.listSupportMessages.mockResolvedValue([
-      {
-        id: "message-1",
-        role: "user",
-        content: "Primeira mensagem",
-        created_at: "2026-08-01T18:00:00Z",
-      },
-    ]);
+    apiStub.listSupportMessages
+      .mockResolvedValueOnce([
+        {
+          id: "message-1",
+          role: "user",
+          content: "Primeira mensagem",
+          created_at: "2026-08-01T18:00:00Z",
+        },
+      ])
+      .mockResolvedValue([
+        {
+          id: "message-1",
+          role: "user",
+          content: "Primeira mensagem",
+          created_at: "2026-08-01T18:00:00Z",
+        },
+        {
+          id: "message-2",
+          role: "user",
+          content: "Informação adicional",
+          created_at: "2026-08-01T18:01:00Z",
+        },
+      ]);
     apiStub.sendSupportMessage.mockResolvedValue({
       id: "message-2",
       role: "user",
@@ -116,7 +131,7 @@ describe("SupportPage", () => {
       "Informação adicional",
     );
     await user.click(
-      screen.getByRole("button", { name: "Enviar para suporte" }),
+      screen.getByRole("button", { name: "Enviar para o Concierge" }),
     );
 
     await waitFor(() =>
@@ -136,7 +151,7 @@ describe("SupportPage", () => {
     const field = screen.getByLabelText("Descreva sua dúvida ou problema");
     await user.type(field, "Não consigo abrir a tela");
     await user.click(
-      screen.getByRole("button", { name: "Enviar para suporte" }),
+      screen.getByRole("button", { name: "Enviar para o Concierge" }),
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(

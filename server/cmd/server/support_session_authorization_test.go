@@ -129,12 +129,12 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("code=%q", created["public_code"])
 	}
 	var previousState *string
-	var newState, transitionActor string
-	if err := testPool.QueryRow(ctx, `SELECT previous_state, new_state, actor_user_id::text FROM support_case_transition WHERE support_case_id=$1`, created["id"]).Scan(&previousState, &newState, &transitionActor); err != nil {
+	var newState, transitionActorType, transitionActor string
+	if err := testPool.QueryRow(ctx, `SELECT previous_state, new_state, actor_type, actor_id::text FROM support_case_transition WHERE support_case_id=$1`, created["id"]).Scan(&previousState, &newState, &transitionActorType, &transitionActor); err != nil {
 		t.Fatalf("read initial transition: %v", err)
 	}
-	if previousState != nil || newState != "novo" || transitionActor != reporterOne {
-		t.Fatalf("initial transition previous=%v new=%q actor=%q", previousState, newState, transitionActor)
+	if previousState != nil || newState != "novo" || transitionActorType != "member" || transitionActor != reporterOne {
+		t.Fatalf("initial transition previous=%v new=%q actor=%s/%s", previousState, newState, transitionActorType, transitionActor)
 	}
 	for _, role := range []string{"owner", "admin", "member"} {
 		var userID string

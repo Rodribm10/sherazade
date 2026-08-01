@@ -11,20 +11,95 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const completeSupportCaseAnalysis = `-- name: CompleteSupportCaseAnalysis :one
+UPDATE support_case
+SET state = $1,
+    risk_level = $2,
+    confidence = $3,
+    resolution_type = $4,
+    resolution_summary = $5,
+    last_answered_message_id = $6,
+    updated_at = now()
+WHERE id = $7 AND workspace_id = $8
+RETURNING id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at
+`
+
+type CompleteSupportCaseAnalysisParams struct {
+	State                 string      `json:"state"`
+	RiskLevel             pgtype.Text `json:"risk_level"`
+	Confidence            pgtype.Text `json:"confidence"`
+	ResolutionType        pgtype.Text `json:"resolution_type"`
+	ResolutionSummary     pgtype.Text `json:"resolution_summary"`
+	LastAnsweredMessageID pgtype.UUID `json:"last_answered_message_id"`
+	ID                    pgtype.UUID `json:"id"`
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) CompleteSupportCaseAnalysis(ctx context.Context, arg CompleteSupportCaseAnalysisParams) (SupportCase, error) {
+	row := q.db.QueryRow(ctx, completeSupportCaseAnalysis,
+		arg.State,
+		arg.RiskLevel,
+		arg.Confidence,
+		arg.ResolutionType,
+		arg.ResolutionSummary,
+		arg.LastAnsweredMessageID,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i SupportCase
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PublicCode,
+		&i.ReporterUserID,
+		&i.ChatSessionID,
+		&i.SupportIssueID,
+		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
+		&i.AppKey,
+		&i.UnitID,
+		&i.Category,
+		&i.State,
+		&i.RiskLevel,
+		&i.Confidence,
+		&i.ResolutionType,
+		&i.ResolutionSummary,
+		&i.SourceFreshnessAt,
+		&i.ResolvedAt,
+		&i.ConfirmedAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSupportCase = `-- name: CreateSupportCase :one
 INSERT INTO support_case (
-    workspace_id, public_code, reporter_user_id, chat_session_id, app_key, state, idempotency_key
+    workspace_id, public_code, reporter_user_id, chat_session_id, pending_message_id,
+    app_key, state, idempotency_key
 )
-VALUES ($1, 'SUP-' || CASE WHEN char_length($2::text) < 6 THEN lpad($2::text, 6, '0') ELSE $2::text END, $3, $4, 'inaudit', 'novo', $5)
-RETURNING id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at
+VALUES (
+    $1,
+    'SUP-' || CASE WHEN char_length($2::text) < 6 THEN lpad($2::text, 6, '0') ELSE $2::text END,
+    $3,
+    $4,
+    $5,
+    'inaudit',
+    'novo',
+    $6
+)
+RETURNING id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at
 `
 
 type CreateSupportCaseParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	CaseNumber     string      `json:"case_number"`
-	ReporterUserID pgtype.UUID `json:"reporter_user_id"`
-	ChatSessionID  pgtype.UUID `json:"chat_session_id"`
-	IdempotencyKey string      `json:"idempotency_key"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	CaseNumber       string      `json:"case_number"`
+	ReporterUserID   pgtype.UUID `json:"reporter_user_id"`
+	ChatSessionID    pgtype.UUID `json:"chat_session_id"`
+	PendingMessageID pgtype.UUID `json:"pending_message_id"`
+	IdempotencyKey   string      `json:"idempotency_key"`
 }
 
 func (q *Queries) CreateSupportCase(ctx context.Context, arg CreateSupportCaseParams) (SupportCase, error) {
@@ -33,6 +108,7 @@ func (q *Queries) CreateSupportCase(ctx context.Context, arg CreateSupportCasePa
 		arg.CaseNumber,
 		arg.ReporterUserID,
 		arg.ChatSessionID,
+		arg.PendingMessageID,
 		arg.IdempotencyKey,
 	)
 	var i SupportCase
@@ -44,6 +120,8 @@ func (q *Queries) CreateSupportCase(ctx context.Context, arg CreateSupportCasePa
 		&i.ChatSessionID,
 		&i.SupportIssueID,
 		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
 		&i.AppKey,
 		&i.UnitID,
 		&i.Category,
@@ -63,16 +141,17 @@ func (q *Queries) CreateSupportCase(ctx context.Context, arg CreateSupportCasePa
 }
 
 const createSupportCaseTransition = `-- name: CreateSupportCaseTransition :one
-INSERT INTO support_case_transition (support_case_id, previous_state, new_state, actor_user_id)
-VALUES ($1, $2, $3, $4)
-RETURNING id, support_case_id, previous_state, new_state, actor_user_id, created_at
+INSERT INTO support_case_transition (support_case_id, previous_state, new_state, actor_type, actor_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, support_case_id, previous_state, new_state, actor_type, actor_id, created_at
 `
 
 type CreateSupportCaseTransitionParams struct {
 	SupportCaseID pgtype.UUID `json:"support_case_id"`
 	PreviousState pgtype.Text `json:"previous_state"`
 	NewState      string      `json:"new_state"`
-	ActorUserID   pgtype.UUID `json:"actor_user_id"`
+	ActorType     string      `json:"actor_type"`
+	ActorID       pgtype.UUID `json:"actor_id"`
 }
 
 func (q *Queries) CreateSupportCaseTransition(ctx context.Context, arg CreateSupportCaseTransitionParams) (SupportCaseTransition, error) {
@@ -80,7 +159,8 @@ func (q *Queries) CreateSupportCaseTransition(ctx context.Context, arg CreateSup
 		arg.SupportCaseID,
 		arg.PreviousState,
 		arg.NewState,
-		arg.ActorUserID,
+		arg.ActorType,
+		arg.ActorID,
 	)
 	var i SupportCaseTransition
 	err := row.Scan(
@@ -88,14 +168,32 @@ func (q *Queries) CreateSupportCaseTransition(ctx context.Context, arg CreateSup
 		&i.SupportCaseID,
 		&i.PreviousState,
 		&i.NewState,
-		&i.ActorUserID,
+		&i.ActorType,
+		&i.ActorID,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
+const deleteSupportCaseDataByChatSession = `-- name: DeleteSupportCaseDataByChatSession :exec
+WITH cases AS MATERIALIZED (
+    SELECT support_case.id
+    FROM support_case
+    WHERE support_case.chat_session_id = $1
+), deleted_transitions AS (
+    DELETE FROM support_case_transition
+    WHERE support_case_transition.support_case_id IN (SELECT cases.id FROM cases)
+)
+DELETE FROM support_case WHERE support_case.id IN (SELECT cases.id FROM cases)
+`
+
+func (q *Queries) DeleteSupportCaseDataByChatSession(ctx context.Context, chatSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSupportCaseDataByChatSession, chatSessionID)
+	return err
+}
+
 const getSupportCaseByIdempotency = `-- name: GetSupportCaseByIdempotency :one
-SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
+SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
 WHERE workspace_id = $1 AND reporter_user_id = $2 AND idempotency_key = $3
 `
 
@@ -116,6 +214,8 @@ func (q *Queries) GetSupportCaseByIdempotency(ctx context.Context, arg GetSuppor
 		&i.ChatSessionID,
 		&i.SupportIssueID,
 		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
 		&i.AppKey,
 		&i.UnitID,
 		&i.Category,
@@ -135,7 +235,7 @@ func (q *Queries) GetSupportCaseByIdempotency(ctx context.Context, arg GetSuppor
 }
 
 const getSupportCaseBySessionForReporter = `-- name: GetSupportCaseBySessionForReporter :one
-SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
+SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
 WHERE chat_session_id = $1 AND workspace_id = $2 AND reporter_user_id = $3
 `
 
@@ -156,6 +256,8 @@ func (q *Queries) GetSupportCaseBySessionForReporter(ctx context.Context, arg Ge
 		&i.ChatSessionID,
 		&i.SupportIssueID,
 		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
 		&i.AppKey,
 		&i.UnitID,
 		&i.Category,
@@ -175,7 +277,7 @@ func (q *Queries) GetSupportCaseBySessionForReporter(ctx context.Context, arg Ge
 }
 
 const getSupportCaseForReporter = `-- name: GetSupportCaseForReporter :one
-SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
+SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
 WHERE id = $1 AND workspace_id = $2 AND reporter_user_id = $3
 `
 
@@ -196,6 +298,8 @@ func (q *Queries) GetSupportCaseForReporter(ctx context.Context, arg GetSupportC
 		&i.ChatSessionID,
 		&i.SupportIssueID,
 		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
 		&i.AppKey,
 		&i.UnitID,
 		&i.Category,
@@ -214,8 +318,51 @@ func (q *Queries) GetSupportCaseForReporter(ctx context.Context, arg GetSupportC
 	return i, err
 }
 
+const listRecentSupportChatMessages = `-- name: ListRecentSupportChatMessages :many
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions FROM (
+    SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions FROM chat_message
+    WHERE chat_session_id = $1
+    ORDER BY created_at DESC, id DESC
+    LIMIT 20
+) recent
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListRecentSupportChatMessages(ctx context.Context, chatSessionID pgtype.UUID) ([]ChatMessage, error) {
+	rows, err := q.db.Query(ctx, listRecentSupportChatMessages, chatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChatMessage{}
+	for rows.Next() {
+		var i ChatMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChatSessionID,
+			&i.Role,
+			&i.Content,
+			&i.TaskID,
+			&i.CreatedAt,
+			&i.FailureReason,
+			&i.ElapsedMs,
+			&i.MessageKind,
+			&i.ChannelMediaPendingUntil,
+			&i.ChannelIngested,
+			&i.QuickActions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSupportCasesForReporter = `-- name: ListSupportCasesForReporter :many
-SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
+SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
 WHERE workspace_id = $1 AND reporter_user_id = $2
 ORDER BY created_at DESC
 `
@@ -242,6 +389,8 @@ func (q *Queries) ListSupportCasesForReporter(ctx context.Context, arg ListSuppo
 			&i.ChatSessionID,
 			&i.SupportIssueID,
 			&i.TechnicalIssueID,
+			&i.PendingMessageID,
+			&i.LastAnsweredMessageID,
 			&i.AppKey,
 			&i.UnitID,
 			&i.Category,
@@ -265,6 +414,141 @@ func (q *Queries) ListSupportCasesForReporter(ctx context.Context, arg ListSuppo
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSupportCase = `-- name: LockSupportCase :one
+SELECT id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at FROM support_case
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockSupportCaseParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) LockSupportCase(ctx context.Context, arg LockSupportCaseParams) (SupportCase, error) {
+	row := q.db.QueryRow(ctx, lockSupportCase, arg.ID, arg.WorkspaceID)
+	var i SupportCase
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PublicCode,
+		&i.ReporterUserID,
+		&i.ChatSessionID,
+		&i.SupportIssueID,
+		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
+		&i.AppKey,
+		&i.UnitID,
+		&i.Category,
+		&i.State,
+		&i.RiskLevel,
+		&i.Confidence,
+		&i.ResolutionType,
+		&i.ResolutionSummary,
+		&i.SourceFreshnessAt,
+		&i.ResolvedAt,
+		&i.ConfirmedAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markSupportCaseAnalyzing = `-- name: MarkSupportCaseAnalyzing :one
+UPDATE support_case
+SET state = 'em_analise', updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at
+`
+
+type MarkSupportCaseAnalyzingParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) MarkSupportCaseAnalyzing(ctx context.Context, arg MarkSupportCaseAnalyzingParams) (SupportCase, error) {
+	row := q.db.QueryRow(ctx, markSupportCaseAnalyzing, arg.ID, arg.WorkspaceID)
+	var i SupportCase
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PublicCode,
+		&i.ReporterUserID,
+		&i.ChatSessionID,
+		&i.SupportIssueID,
+		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
+		&i.AppKey,
+		&i.UnitID,
+		&i.Category,
+		&i.State,
+		&i.RiskLevel,
+		&i.Confidence,
+		&i.ResolutionType,
+		&i.ResolutionSummary,
+		&i.SourceFreshnessAt,
+		&i.ResolvedAt,
+		&i.ConfirmedAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markSupportCasePending = `-- name: MarkSupportCasePending :one
+UPDATE support_case
+SET pending_message_id = $1,
+    state = 'coletando_contexto',
+    risk_level = NULL,
+    confidence = NULL,
+    resolution_type = NULL,
+    resolution_summary = NULL,
+    updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, workspace_id, public_code, reporter_user_id, chat_session_id, support_issue_id, technical_issue_id, pending_message_id, last_answered_message_id, app_key, unit_id, category, state, risk_level, confidence, resolution_type, resolution_summary, source_freshness_at, resolved_at, confirmed_at, idempotency_key, created_at, updated_at
+`
+
+type MarkSupportCasePendingParams struct {
+	PendingMessageID pgtype.UUID `json:"pending_message_id"`
+	ID               pgtype.UUID `json:"id"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) MarkSupportCasePending(ctx context.Context, arg MarkSupportCasePendingParams) (SupportCase, error) {
+	row := q.db.QueryRow(ctx, markSupportCasePending, arg.PendingMessageID, arg.ID, arg.WorkspaceID)
+	var i SupportCase
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PublicCode,
+		&i.ReporterUserID,
+		&i.ChatSessionID,
+		&i.SupportIssueID,
+		&i.TechnicalIssueID,
+		&i.PendingMessageID,
+		&i.LastAnsweredMessageID,
+		&i.AppKey,
+		&i.UnitID,
+		&i.Category,
+		&i.State,
+		&i.RiskLevel,
+		&i.Confidence,
+		&i.ResolutionType,
+		&i.ResolutionSummary,
+		&i.SourceFreshnessAt,
+		&i.ResolvedAt,
+		&i.ConfirmedAt,
+		&i.IdempotencyKey,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const nextSupportCasePublicSequence = `-- name: NextSupportCasePublicSequence :one

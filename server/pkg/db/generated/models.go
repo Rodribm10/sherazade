@@ -951,27 +951,29 @@ type SquadMember struct {
 }
 
 type SupportCase struct {
-	ID                pgtype.UUID        `json:"id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	PublicCode        string             `json:"public_code"`
-	ReporterUserID    pgtype.UUID        `json:"reporter_user_id"`
-	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
-	SupportIssueID    pgtype.UUID        `json:"support_issue_id"`
-	TechnicalIssueID  pgtype.UUID        `json:"technical_issue_id"`
-	AppKey            string             `json:"app_key"`
-	UnitID            pgtype.UUID        `json:"unit_id"`
-	Category          pgtype.Text        `json:"category"`
-	State             string             `json:"state"`
-	RiskLevel         pgtype.Text        `json:"risk_level"`
-	Confidence        pgtype.Text        `json:"confidence"`
-	ResolutionType    pgtype.Text        `json:"resolution_type"`
-	ResolutionSummary pgtype.Text        `json:"resolution_summary"`
-	SourceFreshnessAt pgtype.Timestamptz `json:"source_freshness_at"`
-	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
-	ConfirmedAt       pgtype.Timestamptz `json:"confirmed_at"`
-	IdempotencyKey    string             `json:"idempotency_key"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	PublicCode            string             `json:"public_code"`
+	ReporterUserID        pgtype.UUID        `json:"reporter_user_id"`
+	ChatSessionID         pgtype.UUID        `json:"chat_session_id"`
+	SupportIssueID        pgtype.UUID        `json:"support_issue_id"`
+	TechnicalIssueID      pgtype.UUID        `json:"technical_issue_id"`
+	PendingMessageID      pgtype.UUID        `json:"pending_message_id"`
+	LastAnsweredMessageID pgtype.UUID        `json:"last_answered_message_id"`
+	AppKey                string             `json:"app_key"`
+	UnitID                pgtype.UUID        `json:"unit_id"`
+	Category              pgtype.Text        `json:"category"`
+	State                 string             `json:"state"`
+	RiskLevel             pgtype.Text        `json:"risk_level"`
+	Confidence            pgtype.Text        `json:"confidence"`
+	ResolutionType        pgtype.Text        `json:"resolution_type"`
+	ResolutionSummary     pgtype.Text        `json:"resolution_summary"`
+	SourceFreshnessAt     pgtype.Timestamptz `json:"source_freshness_at"`
+	ResolvedAt            pgtype.Timestamptz `json:"resolved_at"`
+	ConfirmedAt           pgtype.Timestamptz `json:"confirmed_at"`
+	IdempotencyKey        string             `json:"idempotency_key"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SupportCaseSequence struct {
@@ -984,7 +986,8 @@ type SupportCaseTransition struct {
 	SupportCaseID pgtype.UUID        `json:"support_case_id"`
 	PreviousState pgtype.Text        `json:"previous_state"`
 	NewState      string             `json:"new_state"`
-	ActorUserID   pgtype.UUID        `json:"actor_user_id"`
+	ActorType     string             `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 

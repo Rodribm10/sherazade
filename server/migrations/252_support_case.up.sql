@@ -6,6 +6,8 @@ CREATE TABLE support_case (
     chat_session_id UUID NOT NULL,
     support_issue_id UUID,
     technical_issue_id UUID,
+    pending_message_id UUID,
+    last_answered_message_id UUID,
     app_key TEXT NOT NULL CHECK (app_key = 'inaudit'),
     unit_id UUID,
     category TEXT,
@@ -27,7 +29,8 @@ CREATE TABLE support_case_transition (
     support_case_id UUID NOT NULL,
     previous_state TEXT,
     new_state TEXT NOT NULL,
-    actor_user_id UUID NOT NULL,
+    actor_type TEXT NOT NULL CHECK (actor_type IN ('member', 'agent', 'system')),
+    actor_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
