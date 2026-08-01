@@ -1073,6 +1073,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
+		// Support is an explicit reporter-only allowlist. It stays outside the
+		// generic workspace group, which intentionally excludes reporters.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRole(queries, "reporter"))
+			r.Route("/api/support", func(r chi.Router) {
+				r.Post("/sessions", h.CreateSupportSession)
+				r.Get("/sessions", h.ListSupportSessions)
+				r.Get("/sessions/{id}", h.GetSupportSession)
+				r.Get("/cases/{id}", h.GetSupportCase)
+			})
+		})
+
 		// Cloud Billing proxy. Same upstream service / port as
 		// cloud-runtime — multica-cloud's Fleet and Billing share
 		// :8080 and the same chi router. All routes here forward

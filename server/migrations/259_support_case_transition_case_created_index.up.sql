@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY support_case_transition_case_created_idx ON support_case_transition (support_case_id, created_at);
