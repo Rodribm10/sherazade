@@ -207,7 +207,7 @@ func TestMaybeAnalyzeSupportCaseStoresReadOnlyAnswer(t *testing.T) {
 	`, caseRow.ID).Scan(&actorType, &actorID, &finalState); err != nil {
 		t.Fatalf("load final transition: %v", err)
 	}
-	if actorType != "agent" || actorID != uuidToString(agentID) || finalState != "resposta_proposta" {
+	if actorType != "agent" || actorID != uuidToString(agentID) || finalState != "aguardando_confirmacao" {
 		t.Fatalf("transition actor=%s/%s state=%s", actorType, actorID, finalState)
 	}
 }
