@@ -110,7 +110,9 @@ function RoleBadge({ role }: { role: MemberRole }) {
         ? t(($) => $.role.owner)
         : role === "admin"
           ? t(($) => $.role.admin)
-          : t(($) => $.role.member)}
+          : role === "member"
+            ? t(($) => $.role.member)
+            : role}
     </span>
   );
 }

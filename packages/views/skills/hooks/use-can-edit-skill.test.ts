@@ -38,6 +38,12 @@ describe("canEditSkill", () => {
     ).toBe(true);
   });
 
+  it("denies reporter even when the reporter created the skill", () => {
+    expect(
+      canEditSkill(skill, { userId: "user-alice", role: "reporter" }),
+    ).toBe(false);
+  });
+
   it("denies non-creator members", () => {
     expect(
       canEditSkill(skill, { userId: "user-bob", role: "member" }),

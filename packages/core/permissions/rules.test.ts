@@ -134,6 +134,11 @@ describe("canEditAgent", () => {
       canEditAgent(orphan, { userId: ALICE, role: "member" }).allowed,
     ).toBe(false);
   });
+  it("denies reporter even when the reporter owns the agent", () => {
+    expect(
+      canEditAgent(agent, { userId: ALICE, role: "reporter" }).allowed,
+    ).toBe(false);
+  });
   it("admin can still edit an orphan (owner_id null) agent", () => {
     const orphan = makeAgent({ owner_id: null });
     expect(canEditAgent(orphan, { userId: BOB, role: "admin" }).allowed).toBe(
@@ -157,6 +162,17 @@ describe("canAssignAgentToIssue", () => {
     expect(
       canAssignAgentToIssue(a, { userId: BOB, role: "member" }).allowed,
     ).toBe(true);
+  });
+
+  it("denies reporter from assigning a public_to-workspace agent", () => {
+    const a = makeAgent({
+      visibility: "workspace",
+      permission_mode: "public_to",
+      invocation_targets: workspaceTargets,
+    });
+    expect(
+      canAssignAgentToIssue(a, { userId: BOB, role: "reporter" }).allowed,
+    ).toBe(false);
   });
 
   it("denies non-members from assigning a public_to-workspace agent", () => {
@@ -300,6 +316,10 @@ describe("canEditSkill / canDeleteSkill", () => {
     expect(canEditSkill(skill, { userId: BOB, role: "member" }).allowed)
       .toBe(false);
   });
+  it("denies reporter even when the reporter created the skill", () => {
+    expect(canEditSkill(skill, { userId: ALICE, role: "reporter" }).allowed)
+      .toBe(false);
+  });
   it("denies when created_by is null and user is plain member", () => {
     expect(
       canEditSkill(makeSkill(null), { userId: ALICE, role: "member" }).allowed,
@@ -319,6 +339,11 @@ describe("canEditComment / canDeleteComment", () => {
     expect(canEditComment(c, { userId: ALICE, role: "member" }).allowed).toBe(
       true,
     );
+  });
+  it("denies reporter from editing or deleting their own comment", () => {
+    const c = makeComment({ author_id: ALICE });
+    expect(canEditComment(c, { userId: ALICE, role: "reporter" }).allowed).toBe(false);
+    expect(canDeleteComment(c, { userId: ALICE, role: "reporter" }).allowed).toBe(false);
   });
   it("allows workspace admin to edit someone else's comment", () => {
     const c = makeComment({ author_id: ALICE });
@@ -359,6 +384,11 @@ describe("canDeleteRuntime", () => {
     const r = makeRuntime(ALICE);
     expect(canDeleteRuntime(r, { userId: ALICE, role: "member" }).allowed)
       .toBe(true);
+  });
+  it("denies reporter even when the reporter owns the runtime", () => {
+    const r = makeRuntime(ALICE);
+    expect(canDeleteRuntime(r, { userId: ALICE, role: "reporter" }).allowed)
+      .toBe(false);
   });
   it("allows workspace admin", () => {
     const r = makeRuntime(ALICE);

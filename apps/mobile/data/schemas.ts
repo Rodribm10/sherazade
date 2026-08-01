@@ -556,7 +556,7 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   user_id: z.string().default(""),
-  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  role: z.enum(["owner", "admin", "member", "reporter"]).catch("reporter"),
   created_at: z.string().default(""),
   name: z.string().default(""),
   email: z.string().default(""),

@@ -935,7 +935,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/{id}", func(r chi.Router) {
 				// Member-level access
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
@@ -1005,7 +1005,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				//     run canManageAgent (status gates on the session
 				//     initiator or an admin) before doing anything.
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
 					// Device-flow scan-to-install. Begin opens a new
@@ -1023,7 +1023,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// hit by Slack's browser redirect with no workspace in the path)
 				// and is registered outside this workspace group.
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin", "member"))
 					r.Get("/slack/installations", h.ListSlackInstallations)
 				})
 				r.Group(func(r chi.Router) {
@@ -1112,7 +1112,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireWorkspaceMember(queries))
+			r.Use(middleware.RequireWorkspaceRole(queries, "owner", "admin", "member"))
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
@@ -1585,11 +1585,11 @@ type membershipChecker struct {
 }
 
 func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID string) bool {
-	_, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	member, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      parseUUID(userID),
 		WorkspaceID: parseUUID(workspaceID),
 	})
-	return err == nil
+	return err == nil && member.Role != "reporter"
 }
 
 // patResolver implements realtime.PATResolver using database queries.

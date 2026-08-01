@@ -8,15 +8,15 @@
  * independent. Any rule change must be applied here too.
  *
  * Rule (mirrors backend `server/internal/handler/issue.go:1471-1490`):
- *   - Workspace-visibility agents → assignable by any workspace member
+ *   - Workspace-visibility agents → assignable by owner, admin, or member
  *   - Private agents               → only owner + workspace admins/owners
  *
  * Used by the chat agent picker to filter "agents I can talk to" and by
  * NoAgentBanner to detect the all-zero state.
  */
-import type { Agent } from "@multica/core/types";
+import type { Agent, MemberRole } from "@multica/core/types";
 
-type MemberRoleLike = "owner" | "admin" | "member" | null | undefined;
+type MemberRoleLike = MemberRole | null | undefined;
 
 export function canAssignAgent(
   agent: Agent,

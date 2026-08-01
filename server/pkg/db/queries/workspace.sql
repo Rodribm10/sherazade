@@ -16,6 +16,7 @@ SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
+	AND m.role IN ('owner', 'admin', 'member')
 ORDER BY w.id ASC;
 
 -- name: GetDaemonWorkspace :one

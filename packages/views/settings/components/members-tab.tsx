@@ -49,7 +49,12 @@ const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   owner: Crown,
   admin: Shield,
   member: User,
+  reporter: User,
 };
+
+type ManageableMemberRole = Exclude<MemberRole, "reporter">;
+
+const MANAGEABLE_MEMBER_ROLES = ["owner", "admin", "member"] as const satisfies readonly ManageableMemberRole[];
 
 function useRoleLabels() {
   const { t } = useT("settings");
@@ -68,6 +73,11 @@ function useRoleLabels() {
       label: t(($) => $.members.roles.member.label),
       description: t(($) => $.members.roles.member.description),
       icon: ROLE_ICONS.member,
+    },
+    reporter: {
+      label: "reporter",
+      description: "reporter",
+      icon: ROLE_ICONS.reporter,
     },
   } as const;
 }
@@ -90,14 +100,18 @@ function MemberRow({
   ownerCount: number;
   isSelf: boolean;
   busy: boolean;
-  onRoleChange: (role: MemberRole) => void;
+  onRoleChange: (role: ManageableMemberRole) => void;
   onRemove: () => void;
 }) {
   const { t } = useT("settings");
   const roleConfig = useRoleLabels();
   const rc = roleConfig[member.role];
   const RoleIcon = rc.icon;
-  const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
+  const canEditRole =
+    canManage &&
+    !isSelf &&
+    member.role !== "reporter" &&
+    (member.role !== "owner" || canManageOwners);
   const canRemove = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
   const isLastOwner = member.role === "owner" && ownerCount <= 1;
   const showMenu = canEditRole || canRemove;
@@ -126,41 +140,40 @@ function MemberRow({
                   {t(($) => $.members.change_role)}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="w-auto">
-                  {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
-                    ([role, config]) => {
-                      if (role === "owner" && !canManageOwners) return null;
-                      const Icon = config.icon;
-                      const wouldDemoteLastOwner =
-                        isLastOwner && role !== "owner";
-                      return (
-                        <DropdownMenuItem
-                          key={role}
-                          onClick={() =>
-                            wouldDemoteLastOwner ? undefined : onRoleChange(role)
-                          }
-                          disabled={wouldDemoteLastOwner}
-                          title={
-                            wouldDemoteLastOwner
-                              ? t(($) => $.members.cannot_demote_last_owner_title)
-                              : undefined
-                          }
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          <div className="flex flex-col">
-                            <span>{config.label}</span>
-                            <span className="text-caption text-muted-foreground font-normal">
-                              {wouldDemoteLastOwner
-                                ? t(($) => $.members.cannot_demote_last_owner)
-                                : config.description}
-                            </span>
-                          </div>
-                          {member.role === role && (
-                            <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    }
-                  )}
+                  {MANAGEABLE_MEMBER_ROLES.map((role) => {
+                    const config = roleConfig[role];
+                    if (role === "owner" && !canManageOwners) return null;
+                    const Icon = config.icon;
+                    const wouldDemoteLastOwner =
+                      isLastOwner && role !== "owner";
+                    return (
+                      <DropdownMenuItem
+                        key={role}
+                        onClick={() =>
+                          wouldDemoteLastOwner ? undefined : onRoleChange(role)
+                        }
+                        disabled={wouldDemoteLastOwner}
+                        title={
+                          wouldDemoteLastOwner
+                            ? t(($) => $.members.cannot_demote_last_owner_title)
+                            : undefined
+                        }
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <div className="flex flex-col">
+                          <span>{config.label}</span>
+                          <span className="text-caption text-muted-foreground font-normal">
+                            {wouldDemoteLastOwner
+                              ? t(($) => $.members.cannot_demote_last_owner)
+                              : config.description}
+                          </span>
+                        </div>
+                        {member.role === role && (
+                          <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
+                        )}
+                      </DropdownMenuItem>
+                    );
+                  })}
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
             )}
@@ -238,7 +251,7 @@ export function MembersTab() {
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
 
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<MemberRole>("member");
+  const [inviteRole, setInviteRole] = useState<ManageableMemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
@@ -294,7 +307,7 @@ export function MembersTab() {
     });
   };
 
-  const handleRoleChange = async (memberId: string, role: MemberRole) => {
+  const handleRoleChange = async (memberId: string, role: ManageableMemberRole) => {
     if (!workspace) return;
     setMemberActionId(memberId);
     try {
@@ -362,7 +375,7 @@ export function MembersTab() {
                     label: roleConfig[value].label,
                   }))}
                   value={inviteRole}
-                  onValueChange={(value) => setInviteRole(value as MemberRole)}
+                  onValueChange={(value) => setInviteRole(value as ManageableMemberRole)}
                 >
                   <SelectTrigger size="sm">
                     <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>

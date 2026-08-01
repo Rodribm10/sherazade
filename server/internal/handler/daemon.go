@@ -38,7 +38,7 @@ import (
 
 // requireDaemonWorkspaceAccess verifies the caller has access to the given workspace.
 // For daemon tokens (mdt_), compares the token's workspace ID directly.
-// For PAT/JWT fallback, verifies user membership in the workspace.
+// For PAT/JWT fallback, verifies a non-reporter user membership in the workspace.
 func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
 	if workspaceID == "" {
 		writeError(w, http.StatusNotFound, "not found")
@@ -54,19 +54,17 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		return true
 	}
 
-	// PAT/JWT fallback: check membership cache before hitting DB.
-	userID := requestUserID(r)
-	if userID != "" {
-		if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-			return true
-		}
+	// Do not use MembershipCache here: it stores only membership, not roles.
+	// Reporter authorization must always be resolved from the source of truth.
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	if !ok {
+		return false
 	}
-
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
-	if ok && userID != "" {
-		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	if member.Role == "reporter" {
+		writeError(w, http.StatusNotFound, "not found")
+		return false
 	}
-	return ok
+	return true
 }
 
 // requireDaemonRuntimeAccess looks up a runtime and verifies the caller owns its workspace.
@@ -153,15 +151,9 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if userID == "" {
 		return false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return true
-	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil {
-		return false
-	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
-	return true
+	// Do not use MembershipCache here: it stores only membership, not roles.
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	return err == nil && member.Role != "reporter"
 }
 
 // ---------------------------------------------------------------------------

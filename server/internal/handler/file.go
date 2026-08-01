@@ -435,8 +435,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
-		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+		member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+		if err != nil {
 			writeError(w, http.StatusForbidden, "not a member of this workspace")
+			return
+		}
+		if member.Role == "reporter" {
+			writeError(w, http.StatusForbidden, "insufficient permissions")
 			return
 		}
 
@@ -745,14 +750,11 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return att, true
-	}
-	if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil || member.Role == "reporter" {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
 	return att, true
 }
 
