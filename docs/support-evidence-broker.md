@@ -107,7 +107,16 @@ MULTICA_SUPPORT_EVIDENCE_URL=https://acdvblhzzaneddlxqyst.supabase.co/functions/
 MULTICA_SUPPORT_EVIDENCE_TOKEN=<same dedicated token stored in the InAudit function>
 ```
 
-Do not enable this configuration yet. The live InAudit database currently has
-pre-existing Black Belt table and RPC privilege findings that must be remediated
-and regression-tested before the broker is activated. Until then the Concierge
-continues to use versioned knowledge and reports live evidence as unavailable.
+Do not enable this configuration yet. InAudit PR
+`Rodribm10/InAudit-Antigravity#202`, commit `43413f1`, now contains the candidate
+hardening migration: direct anonymous writes and anonymous execution of the
+Conferência de Quartos RPCs are removed, while authenticated manual actions go
+through permissioned RPCs. The migration is not live yet. Activation still
+requires a controlled apply, a real-JWT regression, a fresh privilege check and
+an end-to-end broker smoke test. Until then the Concierge continues to use
+versioned knowledge and reports live evidence as unavailable.
+
+Residual legacy debt: anonymous `SELECT` remains temporarily because current
+InAudit presentations and reports still read Black Belt through the publishable
+client. Removing that read path is a separate RLS migration after those
+consumers move to authenticated clients.
