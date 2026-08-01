@@ -14,7 +14,7 @@ import (
 func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	var workspaceID, conciergeID, reporterOne, reporterTwo string
+	var workspaceID, conciergeRuntimeID, conciergeID, reporterOne, reporterTwo string
 	if err := testPool.QueryRow(ctx, `INSERT INTO workspace (name, slug, description) VALUES ($1,$2,$3) RETURNING id`, "Support sessions", "support-sessions-"+suffix, "test").Scan(&workspaceID); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,17 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id IN ($1,$2)`, reporterOne, reporterTwo)
 	})
-	if err := testPool.QueryRow(ctx, `INSERT INTO agent (workspace_id,name,description,runtime_mode,runtime_config,visibility,permission_mode,max_concurrent_tasks,owner_id) VALUES ($1,$2,'','cloud','{}','workspace','public_to',1,$3) RETURNING id`, workspaceID, "Support Concierge", reporterOne).Scan(&conciergeID); err != nil {
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'support_test_runtime', 'online', $3, '{}'::jsonb, $4, now())
+		RETURNING id
+	`, workspaceID, "Support Test Runtime", "Support test runtime", reporterOne).Scan(&conciergeRuntimeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `INSERT INTO agent (workspace_id,name,description,runtime_mode,runtime_config,runtime_id,visibility,permission_mode,max_concurrent_tasks,owner_id) VALUES ($1,$2,'','cloud','{}',$3,'workspace','public_to',1,$4) RETURNING id`, workspaceID, "Support Concierge", conciergeRuntimeID, reporterOne).Scan(&conciergeID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +113,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("missing config status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2)) WHERE id=$1`, workspaceID, conciergeID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2::text)) WHERE id=$1`, workspaceID, conciergeID); err != nil {
 		t.Fatal(err)
 	}
 	resp = post(tokenOne, "idem-key-0001")
@@ -400,11 +410,21 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("client agent_id status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
-	var foreignAgentID string
-	if err := testPool.QueryRow(ctx, `INSERT INTO agent (workspace_id,name,description,runtime_mode,runtime_config,visibility,permission_mode,max_concurrent_tasks,owner_id) VALUES ($1,$2,'','cloud','{}','workspace','public_to',1,$3) RETURNING id`, otherWorkspaceID, "Foreign Concierge", reporterOne).Scan(&foreignAgentID); err != nil {
+	var foreignRuntimeID, foreignAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'support_foreign_test_runtime', 'online', $3, '{}'::jsonb, $4, now())
+		RETURNING id
+	`, otherWorkspaceID, "Foreign Support Test Runtime", "Foreign support test runtime", reporterOne).Scan(&foreignRuntimeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2)) WHERE id=$1`, workspaceID, foreignAgentID); err != nil {
+	if err := testPool.QueryRow(ctx, `INSERT INTO agent (workspace_id,name,description,runtime_mode,runtime_config,runtime_id,visibility,permission_mode,max_concurrent_tasks,owner_id) VALUES ($1,$2,'','cloud','{}',$3,'workspace','public_to',1,$4) RETURNING id`, otherWorkspaceID, "Foreign Concierge", foreignRuntimeID, reporterOne).Scan(&foreignAgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET settings = jsonb_build_object('support', jsonb_build_object('concierge_agent_id',$2::text)) WHERE id=$1`, workspaceID, foreignAgentID); err != nil {
 		t.Fatal(err)
 	}
 	resp = post(tokenOne, "idem-key-0003")

@@ -4319,13 +4319,11 @@ func createEphemeralMember(t *testing.T, workspaceID, label, role string) (strin
 	return userID, memberID
 }
 
-// TestRequireDaemonWorkspaceAccess_CacheHit proves the cache lookup actually
-// short-circuits the DB query. The trick: the request actor is a "ghost"
-// user with NO member row in the workspace. With an empty cache the access
-// check must fail; after priming the cache it must succeed. If a future
-// change ever bypasses the cache and falls through to the DB, the priming
-// step stops mattering and the second assertion catches it.
-func TestRequireDaemonWorkspaceAccess_CacheHit(t *testing.T) {
+// TestRequireDaemonWorkspaceAccess_IgnoresMembershipCache proves this
+// role-sensitive boundary never trusts the membership-only cache. A stale
+// cache grant cannot reveal daemon or repository surfaces to a reporter (or a
+// removed member), because the current database role is always authoritative.
+func TestRequireDaemonWorkspaceAccess_IgnoresMembershipCache(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -4334,25 +4332,20 @@ func TestRequireDaemonWorkspaceAccess_CacheHit(t *testing.T) {
 
 	ghostUserID := createEphemeralUser(t, "ghost")
 
-	// Baseline: with an empty cache the ghost has no path to access.
+	// A forged or stale membership-only cache entry must not grant access.
+	testHandler.MembershipCache.Set(ctx, ghostUserID, testWorkspaceID)
+
 	req := newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
 	w := httptest.NewRecorder()
 	if testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
-		t.Fatal("setup: ghost user must not be allowed without cache priming")
+		t.Fatal("membership cache bypassed the role-aware database check")
 	}
-
-	// Priming the cache is the only thing that changes — the access check
-	// must now succeed via the cache short-circuit.
-	testHandler.MembershipCache.Set(ctx, ghostUserID, testWorkspaceID)
-
-	req = newRequestAsUser(ghostUserID, "GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
-	w = httptest.NewRecorder()
-	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
-		t.Fatalf("expected access via cache hit, got denied (status %d)", w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected fail-closed 404, got %d", w.Code)
 	}
 }
 
-func TestRequireDaemonWorkspaceAccess_CacheMissBackfills(t *testing.T) {
+func TestRequireDaemonWorkspaceAccess_DoesNotBackfillMembershipCache(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -4365,16 +4358,17 @@ func TestRequireDaemonWorkspaceAccess_CacheMissBackfills(t *testing.T) {
 		t.Fatal("expected cache miss before request")
 	}
 
-	// Make a request that triggers DB lookup.
+	// A real non-reporter member still receives access from the database.
 	req := newRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil)
 	w := httptest.NewRecorder()
 	if !testHandler.requireDaemonWorkspaceAccess(w, req, testWorkspaceID) {
 		t.Fatalf("expected access granted via DB lookup, got denied (status %d)", w.Code)
 	}
 
-	// Cache should now be backfilled.
-	if !testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
-		t.Fatal("expected cache to be backfilled after DB hit")
+	// Do not populate a role-blind grant at this boundary. A later downgrade to
+	// reporter must take effect immediately rather than waiting for cache TTL.
+	if testHandler.MembershipCache.Get(ctx, testUserID, testWorkspaceID) {
+		t.Fatal("role-aware daemon access unexpectedly backfilled membership cache")
 	}
 }
 
