@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +14,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/llm"
 )
+
+type stubSupportEvidenceProvider struct {
+	request supportEvidenceRequest
+	bundle  supportEvidenceBundle
+	calls   int
+}
+
+func (s *stubSupportEvidenceProvider) Collect(_ context.Context, request supportEvidenceRequest) (supportEvidenceBundle, error) {
+	s.calls++
+	s.request = request
+	return s.bundle, nil
+}
 
 func TestParseSupportAIResultEnforcesAutonomyGate(t *testing.T) {
 	tests := []struct {
@@ -34,9 +48,9 @@ func TestParseSupportAIResultEnforcesAutonomyGate(t *testing.T) {
 		},
 		{
 			name:        "does not duplicate the no-change notice",
-			raw:         `{"outcome":"escalate","risk":"medium","confidence":"low","reply":"Não fiz nenhuma alteração no InAudit. O caso precisa de investigação.","summary":"Escalonamento"}`,
+			raw:         `{"outcome":"escalate","risk":"medium","confidence":"low","reply":"Não fiz nenhuma alteração no sistema. O caso precisa de investigação.","summary":"Escalonamento"}`,
 			wantOutcome: "escalate",
-			wantPrefix:  "Não fiz nenhuma alteração no InAudit. O caso",
+			wantPrefix:  "Não fiz nenhuma alteração no sistema. O caso",
 		},
 		{
 			name:      "rejects an unknown outcome",
@@ -129,9 +143,28 @@ func newSupportAIHandlerTestCase(t *testing.T) (db.SupportCase, pgtype.UUID) {
 
 func TestMaybeAnalyzeSupportCaseStoresReadOnlyAnswer(t *testing.T) {
 	caseRow, agentID := newSupportAIHandlerTestCase(t)
-	srv := stubLLMCompletion(t, http.StatusOK, `{"outcome":"answer","risk":"low","confidence":"high","reply":"Abra a tarefa e confira se ela foi concluída dentro do prazo configurado.","summary":"Orientação sobre pontuação"}`)
+	var llmRequestBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read LLM request: %v", err)
+		}
+		llmRequestBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		content := `{"outcome":"answer","risk":"low","confidence":"high","reply":"Abra a tarefa e confira se ela foi concluída dentro do prazo configurado.","summary":"Orientação sobre pontuação"}`
+		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":`+jsonString(content)+`},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+	evidence := &stubSupportEvidenceProvider{bundle: supportEvidenceBundle{Sources: []supportEvidenceSource{{
+		Kind:       "data",
+		Title:      "Explicação determinística da pontuação",
+		Reference:  "rpc://explain_black_belt_score_v1",
+		Content:    "A tarefa foi concluída depois do prazo configurado.",
+		ObservedAt: "2026-08-01T16:00:01Z",
+	}}}}
 	handler := *testHandler
 	handler.LLM = llm.New(llm.Config{APIKey: "test-key", BaseURL: srv.URL})
+	handler.SupportEvidence = evidence
 
 	completed := handler.maybeAnalyzeSupportCase(caseRow)
 	if completed.State != "resposta_proposta" {
@@ -157,6 +190,12 @@ func TestMaybeAnalyzeSupportCaseStoresReadOnlyAnswer(t *testing.T) {
 	}
 	if tasks != 0 {
 		t.Fatalf("read-only Concierge enqueued %d coding task(s)", tasks)
+	}
+	if evidence.calls != 1 || evidence.request.ApplicationKey != "inaudit" || evidence.request.ReporterEmail == "" {
+		t.Fatalf("evidence calls=%d request=%+v", evidence.calls, evidence.request)
+	}
+	if !strings.Contains(llmRequestBody, "rpc://explain_black_belt_score_v1") || !strings.Contains(llmRequestBody, `\"evidence_status\":\"complete\"`) {
+		t.Fatalf("LLM request does not contain attributed evidence: %s", llmRequestBody)
 	}
 	var actorType, actorID, finalState string
 	if err := testPool.QueryRow(context.Background(), `

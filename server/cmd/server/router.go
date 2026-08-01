@@ -228,6 +228,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		SupportEvidenceURL:       strings.TrimSpace(os.Getenv("MULTICA_SUPPORT_EVIDENCE_URL")),
+		SupportEvidenceToken:     strings.TrimSpace(os.Getenv("MULTICA_SUPPORT_EVIDENCE_TOKEN")),
+		SupportEvidenceTimeout:   envDuration("MULTICA_SUPPORT_EVIDENCE_TIMEOUT", 8*time.Second),
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
