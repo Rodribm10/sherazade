@@ -18,6 +18,7 @@ const supportPilotAppKey = "inaudit"
 
 type createSupportSessionRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
+	Description    string `json:"description"`
 }
 
 type supportCaseResponse struct {
@@ -26,6 +27,10 @@ type supportCaseResponse struct {
 	SessionID  string `json:"session_id"`
 	AppKey     string `json:"app_key"`
 	State      string `json:"state"`
+}
+
+type supportMessageRequest struct {
+	Content string `json:"content"`
 }
 
 type supportSettings struct {
@@ -128,6 +133,11 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "idempotency_key must be between 8 and 128 characters")
 		return
 	}
+	req.Description = strings.TrimSpace(req.Description)
+	if req.Description == "" || len(req.Description) > 8*1024 {
+		writeError(w, http.StatusBadRequest, "description must be between 1 and 8192 characters")
+		return
+	}
 
 	concierge, configured := h.configuredSupportConcierge(r, workspaceUUID)
 	if !configured {
@@ -181,6 +191,14 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create support session")
+		return
+	}
+	if _, err := qtx.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       req.Description,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create initial support message")
 		return
 	}
 	sequence, err := qtx.NextSupportCasePublicSequence(r.Context(), workspaceUUID)
@@ -269,4 +287,72 @@ func (h *Handler) GetSupportSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, supportCaseToResponse(caseRow))
+}
+
+func (h *Handler) supportSessionForReporter(w http.ResponseWriter, r *http.Request) (db.SupportCase, bool) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return db.SupportCase{}, false
+	}
+	sessionID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "support session id")
+	if !ok {
+		return db.SupportCase{}, false
+	}
+	caseRow, err := h.Queries.GetSupportCaseBySessionForReporter(r.Context(), db.GetSupportCaseBySessionForReporterParams{ChatSessionID: sessionID, WorkspaceID: parseUUID(ctxWorkspaceID(r.Context())), ReporterUserID: parseUUID(userID)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "support session not found")
+		return db.SupportCase{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load support session")
+		return db.SupportCase{}, false
+	}
+	return caseRow, true
+}
+
+func (h *Handler) ListSupportMessages(w http.ResponseWriter, r *http.Request) {
+	caseRow, ok := h.supportSessionForReporter(w, r)
+	if !ok {
+		return
+	}
+	messages, err := h.Queries.ListChatMessages(r.Context(), caseRow.ChatSessionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list support messages")
+		return
+	}
+	resp := make([]ChatMessageResponse, len(messages))
+	for i, message := range messages {
+		resp[i] = chatMessageToResponse(message, nil)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) SendSupportMessage(w http.ResponseWriter, r *http.Request) {
+	caseRow, ok := h.supportSessionForReporter(w, r)
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8*1024)
+	var req supportMessageRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	req.Content = strings.TrimSpace(req.Content)
+	if req.Content == "" || len(req.Content) > 8*1024 {
+		writeError(w, http.StatusBadRequest, "content must be between 1 and 8192 characters")
+		return
+	}
+	message, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{ChatSessionID: caseRow.ChatSessionID, Role: "user", Content: req.Content})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create support message")
+		return
+	}
+	writeJSON(w, http.StatusCreated, chatMessageToResponse(message, nil))
 }

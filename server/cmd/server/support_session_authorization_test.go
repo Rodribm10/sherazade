@@ -39,7 +39,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("generate reporter one JWT: %v", err)
 	}
 	post := func(token, key string) *http.Response {
-		req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"`+key+`"}`))
+		req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"`+key+`","description":"Preciso de ajuda"}`))
 		if err != nil {
 			t.Fatalf("create POST request: %v", err)
 		}
@@ -63,7 +63,42 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		}
 		return response
 	}
-	resp := post(tokenOne, "idem-key-0001")
+	postMessage := func(token, sessionID, targetWorkspace, body string) *http.Response {
+		req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions/"+sessionID+"/messages?workspace_id="+targetWorkspace, bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatalf("create support message request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		response, err := testServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("support message request: %v", err)
+		}
+		return response
+	}
+	resp := get(tokenOne, "/api/workspaces", workspaceID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list workspaces status=%d", resp.StatusCode)
+	}
+	var workspaceList []struct {
+		ID   string `json:"id"`
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&workspaceList); err != nil {
+		t.Fatalf("decode workspace list: %v", err)
+	}
+	resp.Body.Close()
+	foundReporterRole := false
+	for _, workspace := range workspaceList {
+		if workspace.ID == workspaceID && workspace.Role == "reporter" {
+			foundReporterRole = true
+			break
+		}
+	}
+	if !foundReporterRole {
+		t.Fatalf("workspace list did not expose reporter role: %+v", workspaceList)
+	}
+	resp = post(tokenOne, "idem-key-0001")
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("missing config status=%d", resp.StatusCode)
 	}
@@ -134,6 +169,50 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if fetchedSession["id"] != created["id"] {
 		t.Fatalf("session returned case %q", fetchedSession["id"])
 	}
+	resp = get(tokenOne, "/api/support/sessions/"+created["session_id"]+"/messages", workspaceID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list support messages status=%d", resp.StatusCode)
+	}
+	var messages []struct {
+		ID      string `json:"id"`
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+		t.Fatalf("decode support messages: %v", err)
+	}
+	resp.Body.Close()
+	if len(messages) != 1 || messages[0].Role != "user" || messages[0].Content != "Preciso de ajuda" {
+		t.Fatalf("initial support messages=%+v", messages)
+	}
+	resp = postMessage(tokenOne, created["session_id"], workspaceID, `{"content":"Mais contexto"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("send support message status=%d", resp.StatusCode)
+	}
+	var sentMessage struct {
+		ID      string `json:"id"`
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sentMessage); err != nil {
+		t.Fatalf("decode sent support message: %v", err)
+	}
+	resp.Body.Close()
+	if sentMessage.ID == "" || sentMessage.Role != "user" || sentMessage.Content != "Mais contexto" {
+		t.Fatalf("sent support message=%+v", sentMessage)
+	}
+	var enqueuedTasks int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, created["session_id"]).Scan(&enqueuedTasks); err != nil {
+		t.Fatalf("count support tasks: %v", err)
+	}
+	if enqueuedTasks != 0 {
+		t.Fatalf("support message unexpectedly enqueued %d task(s)", enqueuedTasks)
+	}
+	resp = postMessage(tokenOne, created["session_id"], workspaceID, `{"content":"","agent_id":"`+conciergeID+`"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("support message accepted unknown field status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
 	resp = post(tokenOne, "idem-key-0001")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("retry status=%d", resp.StatusCode)
@@ -177,6 +256,16 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("cross-workspace session status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
+	resp = get(tokenOne, "/api/support/sessions/"+created["session_id"]+"/messages", otherWorkspaceID)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-workspace messages status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postMessage(tokenOne, created["session_id"], otherWorkspaceID, `{"content":"Tentativa externa"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-workspace send message status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
 	tokenTwo, err := generateTestJWT(reporterTwo, "two@example.test", "Reporter Two")
 	if err != nil {
 		t.Fatalf("generate reporter two JWT: %v", err)
@@ -189,6 +278,16 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	resp = get(tokenTwo, "/api/support/sessions/"+created["session_id"], workspaceID)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("cross-reporter session status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = get(tokenTwo, "/api/support/sessions/"+created["session_id"]+"/messages", workspaceID)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-reporter messages status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postMessage(tokenTwo, created["session_id"], workspaceID, `{"content":"Tentativa de outra pessoa"}`)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("cross-reporter send message status=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
 	resp = get(tokenTwo, "/api/support/sessions", workspaceID)
@@ -223,7 +322,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"idem-key-concurrent"}`))
+			req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"idem-key-concurrent","description":"Preciso de ajuda"}`))
 			if err != nil {
 				errs <- err
 				return
@@ -287,7 +386,7 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 	if boundary["public_code"] != "SUP-1000000" {
 		t.Fatalf("boundary code=%q", boundary["public_code"])
 	}
-	req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"idem-key-unknown","agent_id":"`+conciergeID+`"}`))
+	req, err := http.NewRequest(http.MethodPost, testServer.URL+"/api/support/sessions?workspace_id="+workspaceID, bytes.NewBufferString(`{"idempotency_key":"idem-key-unknown","description":"Preciso de ajuda","agent_id":"`+conciergeID+`"}`))
 	if err != nil {
 		t.Fatalf("create unknown-field request: %v", err)
 	}

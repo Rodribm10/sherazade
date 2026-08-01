@@ -1081,6 +1081,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/sessions", h.CreateSupportSession)
 				r.Get("/sessions", h.ListSupportSessions)
 				r.Get("/sessions/{id}", h.GetSupportSession)
+				r.Get("/sessions/{id}/messages", h.ListSupportMessages)
+				r.Post("/sessions/{id}/messages", h.SendSupportMessage)
 				r.Get("/cases/{id}", h.GetSupportCase)
 			})
 		})
