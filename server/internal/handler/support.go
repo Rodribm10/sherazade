@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -97,6 +98,13 @@ func parseUUIDString(value string) (pgtype.UUID, bool) {
 	return parsed, true
 }
 
+func isSupportIdempotencyConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) &&
+		pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "support_case_idempotency_unique"
+}
+
 func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -167,8 +175,10 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
 		return
 	}
-	// Re-check after serializing on the workspace lock. This makes concurrent
-	// retries return the first committed case instead of creating an orphan chat.
+	// Re-check inside the transaction to avoid duplicate work when a prior
+	// request committed between the preflight read and transaction start. The
+	// workspace lock protects create-vs-delete, but is intentionally shared by
+	// creators; the unique idempotency index below arbitrates true races.
 	if existing, err := qtx.GetSupportCaseByIdempotency(r.Context(), db.GetSupportCaseByIdempotencyParams{
 		WorkspaceID: workspaceUUID, ReporterUserID: reporterUUID, IdempotencyKey: req.IdempotencyKey,
 	}); err == nil {
@@ -211,6 +221,25 @@ func (h *Handler) CreateSupportSession(w http.ResponseWriter, r *http.Request) {
 		ChatSessionID: session.ID, IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
+		if isSupportIdempotencyConflict(err) {
+			// The competing transaction has committed before PostgreSQL reports
+			// the unique violation. Roll back this transaction (including its
+			// chat, initial message, and sequence increment), then return the
+			// winner as an ordinary idempotent retry.
+			if rollbackErr := tx.Rollback(r.Context()); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				writeError(w, http.StatusInternalServerError, "failed to resolve support case retry")
+				return
+			}
+			existing, loadErr := h.Queries.GetSupportCaseByIdempotency(r.Context(), db.GetSupportCaseByIdempotencyParams{
+				WorkspaceID: workspaceUUID, ReporterUserID: reporterUUID, IdempotencyKey: req.IdempotencyKey,
+			})
+			if loadErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load support case retry")
+				return
+			}
+			writeJSON(w, http.StatusOK, supportCaseToResponse(existing))
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to create support case")
 		return
 	}
