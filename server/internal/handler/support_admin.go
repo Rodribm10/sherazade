@@ -88,6 +88,12 @@ func (h *Handler) ListSupportCasesAdmin(w http.ResponseWriter, r *http.Request) 
 	}
 	response := make([]supportAdminCaseResponse, 0, len(rows))
 	for _, row := range rows {
+		// Reconcile idempotently so an earlier transient project/issue failure
+		// cannot leave an escalated case invisible to the operational queue.
+		row = h.ensureSupportIssue(r.Context(), row, false)
+		if row.State == "em_investigacao_tecnica" || row.State == "aguardando_aprovacao" || row.TechnicalIssueID.Valid {
+			row = h.ensureSupportIssue(r.Context(), row, true)
+		}
 		response = append(response, supportCaseToAdminResponse(row))
 	}
 	writeJSON(w, http.StatusOK, response)

@@ -167,7 +167,7 @@ func TestMaybeAnalyzeSupportCaseStoresReadOnlyAnswer(t *testing.T) {
 	handler.SupportEvidence = evidence
 
 	completed := handler.maybeAnalyzeSupportCase(caseRow)
-	if completed.State != "resposta_proposta" {
+	if completed.State != "aguardando_confirmacao" {
 		t.Fatalf("state=%q", completed.State)
 	}
 	if completed.ResolutionType.String != "answer" || completed.RiskLevel.String != "low" || completed.Confidence.String != "high" {

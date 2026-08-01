@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -27,8 +28,11 @@ func supportAttachmentContentType(filename string, sample []byte) (string, bool)
 			return contentType, true
 		}
 	case ".webp":
-		if contentType == "image/webp" {
-			return contentType, true
+		// Go releases before WebP sniffing support classify the same valid
+		// RIFF/WEBP signature as octet-stream. Validate the container marker
+		// directly so production and CI enforce the same bytes.
+		if len(sample) >= 12 && bytes.Equal(sample[:4], []byte("RIFF")) && bytes.Equal(sample[8:12], []byte("WEBP")) {
+			return "image/webp", true
 		}
 	case ".pdf":
 		if contentType == "application/pdf" {
