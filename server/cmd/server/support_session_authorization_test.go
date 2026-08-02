@@ -212,6 +212,26 @@ func TestSupportSessionsAreReporterOwnedAndIdempotent(t *testing.T) {
 		}
 		return response
 	}
+	resp = postAdmin(adminToken, "/api/support-admin/cases/"+created["id"]+"/technical-result", `{"status":"validated","summary":"Validação sem execução não pode avançar o caso"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("pre-approval validated result status=%d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	resp = postAdmin(adminToken, "/api/support-admin/cases/"+created["id"]+"/technical-result", `{"status":"blocked","summary":"Spec recusada por evidência insuficiente; nenhuma execução ocorreu"}`)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("pre-approval blocked result status=%d", resp.StatusCode)
+	}
+	var blockedResult map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&blockedResult); err != nil {
+		t.Fatalf("decode pre-approval blocked result: %v", err)
+	}
+	resp.Body.Close()
+	if blockedResult["state"] != "bloqueado" {
+		t.Fatalf("pre-approval blocked result state=%v", blockedResult["state"])
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE support_case SET state='em_investigacao_tecnica' WHERE id=$1`, created["id"]); err != nil {
+		t.Fatal(err)
+	}
 	resp = postAdmin(ownerToken, "/api/support-admin/cases/"+created["id"]+"/request-approval", `{"summary":"Correção isolada com testes obrigatórios"}`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("request approval status=%d", resp.StatusCode)

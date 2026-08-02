@@ -294,7 +294,9 @@ func (h *Handler) updateSupportCaseAdmin(w http.ResponseWriter, r *http.Request,
 		})
 	case "result":
 		nextState := map[string]string{"validated": "pronto_para_publicar", "blocked": "bloqueado", "needs_rework": "em_correcao", "published": "publicado"}[resultStatus]
-		if resultStatus != "published" && !oneOf(previous, "em_correcao", "em_validacao") {
+		technicalResultAllowed := oneOf(previous, "em_correcao", "em_validacao") ||
+			(resultStatus == "blocked" && previous == "em_investigacao_tecnica")
+		if resultStatus != "published" && !technicalResultAllowed {
 			writeError(w, http.StatusConflict, "support case is not in technical execution")
 			return
 		}
